@@ -1,0 +1,13 @@
+node_modules/
+.runtime/
+*.sqlite*
+*.zip
+!dist/downloads/jaipur-synthetic-case.zip
+*.log
+android/.gradle/
+android/**/build/
+android/local.properties
+android/*.jks
+android/*.keystore
+android/.idea/
+

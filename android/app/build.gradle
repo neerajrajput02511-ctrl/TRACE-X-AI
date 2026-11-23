@@ -1,0 +1,41 @@
+plugins {
+    id "com.android.application"
+}
+
+android {
+    namespace "in.shyne.tracex"
+    compileSdk 36
+    defaultConfig {
+        applicationId "in.shyne.tracex"
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName "1.0"
+    }
+    signingConfigs {
+        if (project.hasProperty("demoDistribution")) {
+            fieldBuild {
+                storeFile file(System.getenv("TRACEX_SIGNING_STORE"))
+                storePassword System.getenv("TRACEX_SIGNING_PASSWORD")
+                storeType "PKCS12"
+                keyAlias "trace-x"
+                keyPassword System.getenv("TRACEX_SIGNING_PASSWORD")
+            }
+        }
+    }
+    buildTypes {
+        release {
+            if (project.hasProperty("demoDistribution")) signingConfig signingConfigs.fieldBuild
+        }
+    }
+}
+
+// Package the same reviewed workspace that the website serves, with no nested APK.
+def bundledWeb = tasks.register("bundleConsoleAssets", Sync) {
+    from(rootProject.file("../dist")) {
+        exclude "**/*.apk", "sw.js", "service-worker.js"
+    }
+    into(layout.buildDirectory.dir("generated/traceAssets"))
+}
+android.sourceSets.main.assets.srcDir(bundledWeb.map { it.destinationDir })
+tasks.named("preBuild").configure { dependsOn(bundledWeb) }

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#10274b">
+<title>TRACE-X | Telecom investigation workspace</title><meta name="description" content="Explore telecom records, inspect connections and verify cited findings in the TRACE-X investigation workspace.">
+<link rel="icon" href="./mark.svg" type="image/svg+xml"><link rel="manifest" href="./manifest.webmanifest"><link rel="stylesheet" href="./site.css"><script type="module" src="./landing.js"></script><script src="./register.js" defer></script></head>
+<body><a href="#main" class="skip">Skip to content</a>
+<header class="head"><div class="container nav"><a class="wordmark" href="./" aria-label="Trace X home"><img src="./mark.svg" width="37" height="37" alt="">TRACE<span>—</span>X</a>
+<nav aria-label="Primary"><a href="#workflow">Workflow</a><a href="#field">Field app</a><a href="./console.html" class="nav-open">Open workspace</a></nav></div></header>
+<main id="main"><section class="hero"><div class="container hero-in"><div class="copy">
+<div class="eyebrow"><i></i> TELECOM INVESTIGATION PLATFORM</div>
+<h1>Follow the<br><em>signal.</em></h1>
+<p>Turn call and IP records into a case you can trace. Explore shared contacts, ask a question, and open the rows behind each finding.</p>
+<div class="actions"><a class="primary" href="./console.html">Launch workspace</a><a class="secondary" href="#field">Get field app</a></div>
+</div><div class="instrument" aria-label="Interactive shared-contact example">
+<div class="instrument-head"><span><i></i> RELATIONSHIP EXPLORER</span><span>FIG. A–X–B</span></div>
+<div class="plot"><canvas id="terrain" aria-hidden="true"></canvas>
+<svg viewBox="0 0 600 320" role="img" aria-label="Two observed links connect subject A and subject B through shared contact X." preserveAspectRatio="none" class="traces"><defs><pattern id="mesh" patternUnits="userSpaceOnUse" width="40" height="40"><path d="M40 0H0V40" fill="none" stroke="#9fcbeb" stroke-opacity=".12" stroke-width=".75"/></pattern></defs><rect width="600" height="320" fill="url(#mesh)"/><path d="M117 192L318 116L467 204" fill="none" stroke="#75afff" stroke-width="2" stroke-dasharray="6 4"/><circle cx="318" cy="116" r="45" stroke="#85b4ff" stroke-width="1" opacity=".45" stroke-dasharray="3 6" fill="none"/><circle cx="318" cy="116" r="61" stroke="#85b4ff" stroke-width=".7" opacity=".33" fill="none"/></svg>
+<button class="marker a" data-item="A" aria-label="Inspect subject A"><b>A</b><span>SUBJECT A</span></button><button class="marker x active" data-item="X" aria-label="Inspect shared contact X"><b>X</b><span>SHARED CONTACT</span></button><button class="marker b" data-item="B" aria-label="Inspect subject B"><b>B</b><span>SUBJECT B</span></button>
+<span class="plot-meta">SYNTHETIC CASE</span><span class="axis" aria-hidden="true">+ &nbsp; + &nbsp; +</span></div>
+<div class="readout" aria-live="polite"><div class="read-icon" aria-hidden="true">⌖</div><div><small id="panel-label">SELECTED CONNECTION</small><strong id="panel-title">A and B share contact X</strong></div><a href="./console.html#graph" aria-label="Open full contact graph">View graph</a></div>
+</div></div></section>
+<section class="tools container" id="workflow"><div class="section-intro"><div class="eyebrow"><i></i> CASE WORKFLOW</div><h2>Inside the workspace</h2><p>Work through a synthetic Jaipur case or import your own hackathon dataset.</p><p style="margin-top:14px"><a style="color:var(--blue);text-decoration:underline" href="./downloads/jaipur-synthetic-case.zip" download>Download sample files (ZIP)</a></p></div><div class="workflow-links">
+<a href="./console.html#sources"><span class="glyph" aria-hidden="true">⇵</span><div><h3>Import records</h3><p>Normalize operator files and inspect flagged rows.</p></div><span class="plus">+</span></a>
+<a href="./console.html#graph"><span class="glyph icon-nodes" aria-hidden="true">⌬</span><div><h3>Explore connections</h3><p>Follow contact links and tower observations back to source.</p></div><span class="plus">+</span></a>
+<a href="./console.html#assistant"><span class="glyph" aria-hidden="true">⌕</span><div><h3>Ask about the evidence</h3><p>Get a case-scoped answer with records you can inspect.</p></div><span class="plus">+</span></a></div></section>
+<section id="field"><div class="container field-in"><div><div class="eyebrow"><i></i> TRACE-X FIELD APP</div><h2>Casework on your device.</h2><p>Open the mobile workspace, inspect evidence, and review saved cases offline. Each installation stores its own workspace.</p></div><div class="field-actions"><a id="apk-link" class="primary" href="./downloads/trace-x.apk" download>Download Android APK</a><button class="secondary" id="install-button">Install web app</button><div id="install-help" hidden role="status"></div></div></div></section>
+</main><footer><div class="container"><a class="wordmark" href="./"><img src="./mark.svg" width="26" height="26" alt="">TRACE<span>—</span>X</a><span>Team SHYNE · PS03</span></div></footer></body></html>
