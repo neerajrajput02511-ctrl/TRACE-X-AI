@@ -10,6 +10,7 @@ Verified in the Windows workspace `D:\TRACEX AI\trace-x` using Node 24.13.1, npm
 | `npm.cmd test` | 23 tests passed, 0 failed. Covered hashes, multiline provenance, role and case isolation, legacy migration, upload replay, real XLSX row numbers, missing ports, bounds, seed safety and server-generated PDF. |
 | `npm.cmd run e2e` | Passed real Edge lifecycle with separate investigator and reviewer contexts: 4 multipart uploads, mapping preview, evidence integrity, interactive Cytoscape/Leaflet, original row, denied access, assignment, independent sign-off, downloaded PDF and audit event. |
 | `npm.cmd run e2e:ui` | Passed real Edge checks for admin and access management, original downloads, indexed filters, date-scoped common paths, read-only mobile mode, narrow layout, offline API error and retry. |
+| Static PWA smoke in Edge | At 390 px, disabled network after service worker activation. Reloaded the workspace and opened Cytoscape and Leaflet from the cache. |
 | Local Ollama adapter with `TRACEX_OLLAMA_MODEL=qwen2.5:7b` | Returned `{"intent":"tower"}` for a masked sample question. Core queries have an independent deterministic path. |
 | `npm.cmd audit --omit=dev` | 0 vulnerabilities reported by the npm registry at test time. |
 | `START_TRACEX.bat -Port 4481` with a temporary DB | Launcher printed correct addresses. `GET /healthz` returned `{"status":"ok"}`. |
@@ -33,6 +34,10 @@ The signed release at `dist/downloads/trace-x.apk` has 932,953 bytes and SHA-256
 - The initial Windows Gradle wrapper attempt tried to download an uncached AAPT2 package. The successful build used the installed SDK's AAPT2 path as documented.
 - Initial Edge tests hit a duplicate selector and a reviewer route that only changed the URL fragment. The test now selects the file control and reloads after access changes. The corrected lifecycle passed.
 - Reading the Android Downloads file before the Save As stream finished returned zero bytes. The completed file had a valid PDF header and the expected length.
+
+## Hosted demo
+
+Sites confirmed owner-private deployment of `c322c6f` as succeeded on 23 November 2026. The hosted build contains the browser-local synthetic experience and the signed APK. Shared team sessions run at the configured team server. The local server returned HTTP 200 from `/healthz`, and the preview server returned the signed APK with its 932,953-byte length.
 
 ## Coverage limits
 
