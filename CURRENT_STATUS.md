@@ -17,3 +17,16 @@ Baseline `npm.cmd test` on Node v24.13.1 passed 13/13. Android baseline is nativ
 | Search and admin | Partial | Client filter, CLI provisioning | Add server index and admin view |
 | Android | Partial | Java WebView and signed offline APK; no backend integration | Use same-origin site in a secure server connection and retain read-only demo |
 | Tooling | Partial | README, tests, native build script | Add Windows launch, container, fixtures, docs and measurable QA |
+
+## Delivery status
+
+| Area | Status | Test evidence | Next action |
+| --- | --- | --- | --- |
+| Shared accounts, assignments and case status | Implemented | Unit and case isolation, admin, case scopes, archive, access revocation | Configure the deployment's accounts and access policy |
+| CDR, IPDR, XLSX and original evidence | Implemented for supported formats | Confirmed mapping, physical worksheet rows, exact-byte downloads, SHA-256 and malformed uploads | Validate approved operator formats before operational use |
+| Search, graph, towers and device/intelligence views | Implemented | Indexed filters, directed paths, citations, tower date and party filters | Validate multi-user load separately from the engine benchmark |
+| Assistant, approvals, audit and PDFs | Implemented | Cited query, unsupported claim, version-bound sign-off and downloadable PDF on web and Android | Review findings with the intended users |
+| Android | Implemented and emulator-tested | Signed release and debug builds, real shared login/import/report, offline read-only | Test on the target phones and trusted HTTPS network |
+| Windows tools, backup and Compose | Implemented | Launcher and backup validated. Compose config parsed | Exercise Compose after starting its container engine |
+
+The exact commands, results and remaining coverage limits are in [VALIDATION_REPORT.md](VALIDATION_REPORT.md).
