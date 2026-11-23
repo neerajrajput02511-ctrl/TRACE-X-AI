@@ -46,3 +46,28 @@ The implementation extends the existing JavaScript/Node/SQLite architecture. Nex
 ## Workspace launch recovery
 
 In Edge, the **Launch workspace** link reproduced the startup error when IndexedDB access was denied and when a full storage quota prevented saving the sample. After the fix, `npm.cmd run e2e:launch` passed with normal storage, a previously saved case, denied access, quota exhaustion, a temporary cited answer, restored access to the original case, the explicit read-only demo, a stale cached page, and an offline reload. The temporary session does not write case records.
+
+## Observed public data
+
+Ran the checks against isolated local TRACE-X cases with published anonymized or aggregated research data. The test CSVs and outputs are stored under the Git-ignored `.runtime/public-data-validation` directory.
+
+| Source and test | Observed result |
+| --- | --- |
+| [University of Helsinki mobile communication logs](https://www.cs.helsinki.fi/group/context/data/dataset.pdf) | Viewed 768 XML events from a published communication log and retained 487 complete calls. The CSV used local aliases and shifted dates that preserved relative timing. The authenticated multipart CDR upload accepted 487 rows, rejected 0 and generated 100 contact nodes and 99 links. A shared-contact answer cited 87 records. A direct-call claim between the same two peers abstained. Source-row provenance, exact CSV download, SHA-256 verification and idempotent reimport passed. |
+| [CESNET3 observed network flows](https://zenodo.org/records/18984598) | HTTP 206 supplied the first 1,048,576 archive bytes. The bounded extraction yielded 10,283 complete published rows. The 304 ICMP rows were excluded. TRACE-X accepted 9,078 of the 9,979 projected TCP/UDP rows and identified 901 identical projections, with 0 rejected. Duplicate rows retained their provenance. The multipart round trip took 1,441 ms on this workstation. |
+| [Published call-activity aggregates](https://zenodo.org/records/1020613) | HTTP 206 supplied 262,144 bytes and 4,503 complete 30-cities rows. Preview succeeded with unknown import type. The CDR upload returned HTTP 400 for the unsupported headers and left the case empty. The source contains call probabilities by time and area. |
+
+For CESNET, the direct unmodified CSV attempt rejected all 10,283 rows at timestamp parsing. The adapted import used the published source row numbers, translated the publisher's endpoint tokens to reserved benchmarking addresses, and used a local alias for the required subject field. The source wall-clock timestamps have no stated zone in the publisher metadata. UTC was chosen solely for this validation run. The IPDR check therefore exercises observed-flow ingestion and analytics with aliases.
+
+CESNET IP/TCP search returned 60 rows across either endpoint. The assistant returned one exact match at `R101` with the downloaded CSV's line 2 and withheld attribution for three observed overlapping candidates. Edge opened the cited source row. Independent reviewer sign-off produced a 22,913-byte PDF. PDF text extraction confirmed the citation, CSV row, reviewer and SHA-256. A subscriber identity question abstained.
+
+The Helsinki publisher describes anonymized handset event logs rather than carrier billing exports. Tower and device identifiers were outside the sampled communication file. Native operator format, subscriber attribution and tower accuracy remain separate validation tasks.
+
+The [Telecom Italia Dataverse deposit](https://doi.org/10.7910/DVN/EGZHFV) requires a download guestbook. Its API rejected the anonymous download, so the open call-probability dataset provided the aggregate test input.
+
+```powershell
+python '.runtime/public-data-validation/prepare-cesnet.py'
+node '.runtime/public-data-validation/validate-cesnet.mjs'
+```
+
+The CESNET extracted prefix SHA-256 is `34db995aaa73c767944329cfb11df13daabc5f5bd169120d94749ab558dc9827`. The imported CSV SHA-256 is `055566df06d7d5e3dcb420d6fbaa7fa9e90830028b3872676f55fdc884f85660`. The Helsinki working CSV SHA-256 is `ef791e21d6dcc4c676ffb4754a8416dfd2e1ade62dc54ed3ae07247453e9fe00`.
