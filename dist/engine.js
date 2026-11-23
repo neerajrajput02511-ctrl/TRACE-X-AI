@@ -1,4 +1,5 @@
 // Case data, original input and analytics stay in this JavaScript environment.
+import {sha256 as hashBytes, uuid} from './crypto.js';
 const IST = 330;
 const HEADER = {
   from: ['callingnumber','callingpartynumber','aparty','caller','from','originatingnumber','sourcephone','callingno','fromnumber'],
@@ -15,6 +16,8 @@ const HEADER = {
   imsi: ['imsi','simid','subscriberimsi'],
   ip: ['ip','srcip','sourceip','publicip','externalip','publicipv4','publicipaddress','translatedsourceip','publicsourceip'],
   port: ['port','srcport','sourceport','publicport','externalport','translatedsourceport','publicsourceport'],
+  destinationIp: ['destinationip','dstip','remoteip','destinationaddress'],
+  destinationPort: ['destinationport','dstport','remoteport'],
   protocol: ['protocol','transportprotocol','transport','proto'],
   end: ['endts','endtime','sessionend','enddatetime','sessionendtime'],
   name: ['name','towername','sitename','location','site','sitelabel','locality'],
@@ -35,7 +38,7 @@ const normEntity = value => {
 };
 
 export function createCase(name = 'Untitled case') {
-  return {id:'TX-' + crypto.randomUUID().slice(0,8).toUpperCase(), name:safeText(name) || 'Untitled case',
+  return {id:'TX-' + uuid().slice(0,8).toUpperCase(), name:safeText(name) || 'Untitled case',
     createdAt:new Date().toISOString(), files:[], records:[], towers:[], subjects:[]};
 }
 
@@ -93,7 +96,15 @@ function parseTime(value, offset = IST) {
   return new Date(utc.getTime()-offset*60000).toISOString();
 }
 
-const fingerprint = record => JSON.stringify([record.kind, record.from,record.to,record.time,record.duration,record.cell,record.imei,record.imsi,record.ip,record.port,record.protocol,record.end,record.observer]);
+const fingerprint = record => JSON.stringify([record.kind, record.from,record.to,record.time,record.duration,record.cell,record.imei,record.imsi,record.ip,record.port,record.protocol,record.end,record.observer,record.destinationIp||'',record.destinationPort||'']);
+function validateAddress(address) {
+  if (address.includes(':')) {try {new URL('http://['+address+']/');} catch {throw new Error('Invalid IPv6 address.');}}
+  else if (!/^\d{1,3}(?:\.\d{1,3}){3}$/.test(address) || address.split('.').some(x=>+x>255)) throw new Error('Invalid IPv4 address.');
+}
+function portValue(port) {
+  if (port && (!/^\d{1,5}$/.test(port) || +port>65535)) throw new Error('Invalid port.');
+  return port?String(+port):'';
+}
 function parseRow(get, type, offset) {
   if (type === 'TOWER') {
     const cell=get('cell'), lat=Number(get('lat')), lon=Number(get('lon'));
@@ -119,16 +130,17 @@ function parseRow(get, type, offset) {
   const port=get('port'), ip=get('ip'), protocol=get('protocol').toUpperCase();
   if (type==='IPDR') {
     if (!ip) throw new Error('Missing IP address.');
-    if (ip.includes(':')) {try {new URL('http://[' + ip + ']/');} catch {throw new Error('Invalid IPv6 address.');}}
-    else if (!/^\d{1,3}(?:\.\d{1,3}){3}$/.test(ip) || ip.split('.').some(x=>+x>255)) throw new Error('Invalid IPv4 address.');
-    if (port && (!/^\d{1,5}$/.test(port) || +port>65535)) throw new Error('Invalid source port.');
+    validateAddress(ip);
+    const destination=get('destinationIp');
+    if(destination)validateAddress(destination);
   }
   const end=get('end') ? parseTime(get('end'),offset) : '';
   if (end && end<time) throw new Error('Session ends before its start.');
-  return {kind:type,from,to:type==='CDR'?to:'',time,duration,cell:get('cell'),imei:get('imei'),imsi:get('imsi'),ip,port:port?String(+port):'',protocol,end,observer:subscriber || from};
+  const destinationIp=get('destinationIp'), destinationPort=type==='IPDR'?portValue(get('destinationPort')):'';
+  return {kind:type,from,to:type==='CDR'?to:'',time,duration,cell:get('cell'),imei:get('imei'),imsi:get('imsi'),ip,port:portValue(port),protocol,end,observer:subscriber || from,...(destinationIp?{destinationIp}:{}),...(destinationPort?{destinationPort}:{})};
 }
 
-export async function importFile(caseObj, filename, input, options={}) {
+async function getDelimitedInput(input) {
   const bytes = typeof input === 'string' ? new TextEncoder().encode(input)
     : input instanceof Uint8Array ? input : input instanceof ArrayBuffer ? new Uint8Array(input)
     : (typeof Blob !== 'undefined' && input instanceof Blob) ? new Uint8Array(await input.arrayBuffer()) : null;
@@ -136,33 +148,74 @@ export async function importFile(caseObj, filename, input, options={}) {
   if (bytes.length>10*1024*1024) throw new Error('Choose a file under 10 MB.');
   let raw;
   try {raw = new TextDecoder('utf-8',{fatal:true, ignoreBOM:true}).decode(bytes);} catch {throw new Error('Export the file as UTF-8 CSV or TSV.');}
-  const digest=await crypto.subtle.digest('SHA-256',bytes);
-  const sha256=Array.from(new Uint8Array(digest),n=>n.toString(16).padStart(2,'0')).join('');
-  const original=caseObj.files.find(file => file.sha256===sha256);
-  if (original) return {...original.qa,accepted:0,duplicate:original.qa.accepted+original.qa.duplicate,fileId:original.id,alreadyImported:true};
+  return {bytes,raw};
+}
+
+function delimitedRows(raw) {
   const parsed=parseDelimited(raw);
   if (parsed.length<2) throw new Error('The file needs a header and at least one data row.');
-  const [header,...rows]=parsed, fields=new Map();
-  header.values.forEach((label,index)=>{
-    const field=options.columnMap?.[label] || pairs.get(normalizeHeader(label));
-    if (field) {
-      if (fields.has(field)) throw new Error('Two columns map to ' + field + '. Use a column map to select one.');
-      fields.set(field,index);
+  return {header:parsed[0].values,rows:parsed.slice(1)};
+}
+
+function recordType(fields) {
+  if(fields.has('lat') && fields.has('lon') && fields.has('cell')) return 'TOWER';
+  if(fields.has('ip')) return 'IPDR';
+  if((fields.has('from') && fields.has('to')) || (fields.has('subscriber') && fields.has('peer'))) return 'CDR';
+  return null;
+}
+
+function mapping(header,columnMap) {
+  const fields=new Map(), used=new Set();
+  if(columnMap!==undefined) {
+    if(!columnMap || typeof columnMap!=='object' || Array.isArray(columnMap)) throw new Error('Use a column map with evidence fields and matching headers.');
+    for(const [field,label] of Object.entries(columnMap)) {
+      if(!Object.hasOwn(HEADER,field) || typeof label!=='string') throw new Error('The column map has an unknown evidence field.');
+      const index=header.indexOf(label);
+      if(index<0 || header.lastIndexOf(label)!==index || used.has(index)) throw new Error('Each mapped header must name a unique source column.');
+      fields.set(field,index);used.add(index);
     }
-  });
-  const type=fields.has('lat') && fields.has('lon') && fields.has('cell') ? 'TOWER'
-    : fields.has('ip') ? 'IPDR'
-    : (fields.has('from')&&fields.has('to')) || (fields.has('subscriber')&&fields.has('peer')) ? 'CDR' : '';
+  } else for(const [index,label] of header.entries()) {
+    const field=pairs.get(normalizeHeader(label));
+    if(!field)continue;
+    if(fields.has(field))throw new Error('Two columns map to '+field+'. Choose one in the field mapping.');
+    fields.set(field,index);
+  }
+  return fields;
+}
+
+export async function previewImport(input) {
+  const {raw}=await getDelimitedInput(input);
+  const {header,rows}=delimitedRows(raw);
+  let fields;
+  try {fields=mapping(header);} catch {fields=new Map();}
+  return {
+    columns:header.map(label=>({header:label,suggestedField:pairs.get(normalizeHeader(label))||null})),
+    fields:Object.keys(HEADER),
+    rows:rows.slice(0,3).map(row=>({line:row.line,values:row.values})),
+    type:recordType(fields),
+    total:rows.length
+  };
+}
+
+export async function importFile(caseObj, filename, input, options={}) {
+  const {bytes,raw}=await getDelimitedInput(input);
+  const sha256=await hashBytes(bytes);
+  const original=caseObj.files.find(file => file.sha256===sha256);
+  if (original) return {...original.qa,accepted:0,duplicate:original.qa.accepted+original.qa.duplicate,fileId:original.id,alreadyImported:true};
+  const {header,rows}=delimitedRows(raw);
+  const fields=mapping(header,options.columnMap);
+  const type=recordType(fields);
   if (!type) throw new Error('Unknown headers. Use caller/callee, subscriber and public_ip, or cell_id and coordinates.');
   const offset=options.timezoneOffsetMinutes ?? IST;
   if (!Number.isInteger(offset) || Math.abs(offset)>840) throw new Error('Invalid timezone offset.');
   const fileId='F'+String(caseObj.files.length+1).padStart(3,'0');
   const qa={fileId,type,total:rows.length,accepted:0,duplicate:0,rejected:0,issues:[],defaultTimezoneOffsetMinutes:offset};
+  if(options.columnMap!==undefined)qa.columnMap=Object.fromEntries(Array.from(fields.keys(),field=>[field,options.columnMap[field]]));
   const existing=new Map(caseObj.records.map(r=>[fingerprint(r),r]));
   const cellIndex=new Map(caseObj.towers.map(t=>[t.cell,t]));
   for (const row of rows) {
     try {
-      if (row.values.length!==header.values.length) throw new Error('Column count differs from header.');
+      if (row.values.length!==header.length) throw new Error('Column count differs from header.');
       const get=key=>safeText(row.values[fields.get(key)]);
       const record=parseRow(get,type,offset),ref={fileId,line:row.line,raw:row.raw};
       const index=type==='TOWER'?cellIndex:existing, key=type==='TOWER'?record.cell:fingerprint(record), previous=index.get(key);
@@ -213,7 +266,8 @@ function deviceChanges(records) {
 export function analyze(c) {
   const records=[...c.records].sort(timestampOrder), nodesById=new Map(),edgesById=new Map();
   const towersById=new Map(c.towers.map(t=>[t.cell,t])), timeline=[],devices=[];
-  let cdrCount=0;
+  let cdrCount=0, duration=0;
+  const days=new Map(), nightIds=[], durationIds=[];
   for (const r of records) {
     const subject=r.observer || r.from;
     if(r.cell) {
@@ -223,13 +277,22 @@ export function analyze(c) {
     if(r.imei || r.imsi) devices.push({subject,imei:r.imei,imsi:r.imsi,time:r.time,recordId:r.id});
     if(r.kind!=='CDR') continue;
     cdrCount++;
+    const localTime=istParts(r.time),day=localTime.slice(0,10);
+    if(!days.has(day))days.set(day,{date:day,count:0,duration:0,ids:[]});
+    const bucket=days.get(day);
+    bucket.ids.push(r.id);bucket.count++;
+    if(Number.isFinite(r.duration)){duration+=r.duration;bucket.duration+=r.duration;durationIds.push(r.id);}
+    const hour=Number(localTime.slice(11,13));
+    if(hour>=22||hour<6)nightIds.push(r.id);
     for(const id of new Set([r.from,r.to])) {
       if(!nodesById.has(id)) nodesById.set(id,{id,count:0,ids:[]});
       const n=nodesById.get(id);n.count++;n.ids.push(r.id);
     }
     const [source,target]=[r.from,r.to].sort(order), key=JSON.stringify([source,target]);
-    if(!edgesById.has(key)) edgesById.set(key,{source,target,count:0,ids:[]});
+    if(!edgesById.has(key)) edgesById.set(key,{source,target,count:0,forward:0,reverse:0,seconds:0,ids:[]});
     const edge=edgesById.get(key);edge.count++;edge.ids.push(r.id);
+    edge.seconds+=r.duration||0;
+    if(r.from===source)edge.forward++;else edge.reverse++;
   }
   const nodes=[...nodesById.values()].sort((a,b)=>b.count-a.count || order(a.id,b.id));
   const edges=[...edgesById.values()].sort((a,b)=>b.count-a.count || order(a.source,b.source) || order(a.target,b.target));
@@ -240,6 +303,18 @@ export function analyze(c) {
     for(const peer of sharedContacts(records,a,b)) leads.push({id:'shared-'+encodeURIComponent(JSON.stringify([a,b,peer.id])),title:'Shared contact '+peer.id,
       detail:a+' and '+b+' both communicated with '+peer.id+'. '+peer.ids.length+' call records support this link.',
       type:'Shared contact',ids:peer.ids});
+    const latest=new Map(), seenCells=new Set();
+    for(const v of timeline) {
+      if(v.subject!==a&&v.subject!==b)continue;
+      const other=latest.get(JSON.stringify([v.cell,v.subject===a?b:a]));
+      if(other && Date.parse(v.time)-Date.parse(other.time)<=15*60*1000 && !seenCells.has(v.cell)){
+        seenCells.add(v.cell);
+        leads.push({id:'tower-'+encodeURIComponent(v.cell),title:'Tower overlap at '+v.name,
+          detail:a+' and '+b+' were recorded at the same cell within 15 minutes. This shows network observations in a coverage area.',
+          type:'Tower overlap',ids:[other.recordId,v.recordId]});
+      }
+      latest.set(JSON.stringify([v.cell,v.subject]),v);
+    }
   }
   const changes=deviceChanges(records);
   for(const d of changes) leads.push({id:'device-'+d.field+'-'+d.ids.join('-'),title:(d.field==='imei'?'Device':'SIM')+' change on '+d.subject,
@@ -254,14 +329,22 @@ export function analyze(c) {
     leads.push({id:'ip-'+ip,title:'Shared IP address',detail:ip+' appears in sessions for multiple subscribers. A public address alone cannot identify the user.',
       type:'IPDR ambiguity',ids:refIds(sessions)});
   }
-  return {total:records.length,contacts:nodes.length,cdrCount,ipdrCount:records.length-cdrCount,nodes,edges,leads,timeline,devices,changes,topContacts:nodes};
+  const deviceParties=new Map();
+  for(const d of devices) {
+    if(!d.imei)continue;
+    if(!deviceParties.has(d.imei))deviceParties.set(d.imei,new Map());
+    deviceParties.get(d.imei).set(d.subject,d.recordId);
+  }
+  const sharedDevices=[...deviceParties].filter(([,parties])=>parties.size>1).map(([imei,parties])=>({imei,subjects:[...parties.keys()],ids:[...parties.values()]}));
+  return {total:records.length,contacts:nodes.length,cdrCount,ipdrCount:records.length-cdrCount,nodes,edges,leads,timeline,devices,changes,topContacts:nodes,
+    callStats:{duration,durationIds,nightIds,days:[...days.values()]},sharedDevices};
 }
 
 const fail = text => ({text,supported:false,ids:[]});
 const success = (text,ids) => ({text,supported:true,ids:unique(ids)});
 const istParts = iso => new Date(new Date(iso).getTime()+IST*60000).toISOString();
 const istTime = iso => istParts(iso).slice(11,16);
-const templateHelp='I can check shared contacts, direct calls, top contacts, tower visits, device changes, IP sessions or a call time window. Choose a suggested question.';
+const templateHelp='I can check shared contacts, direct calls, top contacts, tower visits, device changes, IP sessions, missing source ports or a call time window. Choose a suggested question.';
 
 function resolveEntity(c,input) {
   const norm=normEntity(input);
@@ -289,6 +372,22 @@ export function ask(c,question) {
   let m;
   const ident='([\\p{L}\\d_+.-]{1,70})';
   const re=pattern=>new RegExp('^'+pattern+'$','iu');
+  if (/^(?:(?:show|list|find|what) )?(?:ipdr|ip) (?:matches|sessions|records) (?:that have |have |with )?(?:missing|no) (?:source )?ports?(?: information)?$/i.test(q)) {
+    const rows=c.records.filter(r=>r.kind==='IPDR'&&!r.port);
+    return rows.length?success(rows.length+' recorded session(s) have no source port. Identification from those sessions may be ambiguous.',refIds(rows)):fail('No imported IPDR rows with a missing source port match this query.');
+  }
+  if ((m=re('(?:show |list )?(?:tower activity|tower observations|tower timeline)(?: for| of) '+ident+' (?:between|from) (\\d{4}-\\d{2}-\\d{2}) (?:and|to) (\\d{4}-\\d{2}-\\d{2})').exec(q))) {
+    const entity=resolveEntity(c,m[1]);
+    if(!entity)return fail('That identifier is absent from this case.');
+    try {parseTime(m[2]+' 00:00');parseTime(m[3]+' 00:00');if(m[2]>m[3])throw new Error();}
+    catch {return fail('Enter a valid date range in YYYY-MM-DD order.');}
+    const rows=analyze(c).timeline.filter(v=>v.subject===entity&&istParts(v.time).slice(0,10)>=m[2]&&istParts(v.time).slice(0,10)<=m[3]);
+    return rows.length?success(rows.length+' tower observation(s) for '+entity+' in the requested IST date range.',rows.map(v=>v.recordId)):fail('No tower observations for that identifier in the requested range.');
+  }
+  if (/^(?:show |list |find )?(?:night calls|late[- ]night calls|unusual calling hours|night activity)$/i.test(q)) {
+    const ids=analyze(c).callStats.nightIds;
+    return ids.length?success(ids.length+' call(s) were recorded between 22:00 and 05:59 IST.',ids):fail('No rows match the 22:00–05:59 IST night window.');
+  }
   if((m=re('(?:which|what)(?: contacts?| numbers?)? (?:do|are) '+ident+' and '+ident+' (?:share|sharing)').exec(q))
     ||(m=re('(?:show |find |list |what are |which are )?(?:the )?(?:shared|common) (?:contacts?|numbers?) (?:between|for|of) '+ident+' and '+ident).exec(q))
     ||(m=re(ident+' और '+ident+' के (?:साझा|कॉमन) संपर्क(?: कौन हैं| बताओ| दिखाओ)?').exec(q))) return commonAnswer(c,m[1],m[2],false,hindi);

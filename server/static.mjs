@@ -20,7 +20,7 @@ export async function serveStatic(req,res,{team=false}={}) {
     res.setHeader('Cache-Control',team?'no-store':'no-cache');
     if(team) res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'");
     if(team && name==='/sw.js') {res.writeHead(404);return res.end();}
-    if(name.endsWith('.apk')) res.setHeader('Content-Disposition','attachment; filename="trace-x.apk"');
+    if(name.endsWith('.apk')) res.setHeader('Content-Disposition','attachment; filename="'+path.basename(full).replace(/[^a-zA-Z0-9._-]/g,'_')+'"');
     if(req.method==='HEAD')return res.end();
     if(team && path.extname(full)==='.html') {
       const html=await fs.readFile(full,'utf8');

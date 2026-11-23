@@ -9,9 +9,11 @@ android {
         applicationId "in.shyne.tracex"
         minSdk 26
         targetSdk 35
-        versionCode 1
-        versionName "1.0"
+        versionCode 2
+        versionName "1.1"
+        manifestPlaceholders = [permitDemoHttp: "false"]
     }
+    buildFeatures { buildConfig true }
     signingConfigs {
         if (project.hasProperty("demoDistribution")) {
             fieldBuild {
@@ -24,6 +26,10 @@ android {
         }
     }
     buildTypes {
+        debug {
+            applicationIdSuffix ".debug"
+            manifestPlaceholders = [permitDemoHttp: "true"]
+        }
         release {
             if (project.hasProperty("demoDistribution")) signingConfig signingConfigs.fieldBuild
         }

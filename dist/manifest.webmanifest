@@ -1,7 +1,7 @@
 {
   "id": "./console.html",
-  "name": "TRACE-X Investigation Workspace",
-  "short_name": "TRACE-X",
+  "name": "TRACE-X AI Investigation Workspace",
+  "short_name": "TRACE-X AI",
   "description": "Evidence-linked telecom investigation workspace",
   "start_url": "./console.html",
   "scope": "./",

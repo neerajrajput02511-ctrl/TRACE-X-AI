@@ -71,13 +71,19 @@ export function graph(analysis, focus='') {
 export function towerPlot(timeline) {
   const valid=timeline.filter(p=>p.lat!=null && p.lon!=null && Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lon)));
   if (!valid.length) return empty('No mapped observations','Import a tower list with matching cell IDs and coordinates to plot observations.');
-  const unique=Array.from(new Map(valid.map(p=>[String(p.cell),p])).values());
+  const grouped=new Map();
+  for(const p of valid){
+    const existing=grouped.get(p.cell);
+    if(existing)existing.ids.push(p.recordId);
+    else grouped.set(p.cell,{...p,ids:[p.recordId]});
+  }
+  const unique=[...grouped.values()].slice(0,300);
   const lat=unique.map(p=>Number(p.lat)), lon=unique.map(p=>Number(p.lon)), minLat=Math.min(...lat), maxLat=Math.max(...lat), minLon=Math.min(...lon), maxLon=Math.max(...lon);
   const dx=(maxLon-minLon)*Math.max(.01,Math.cos((minLat+maxLat)/2*Math.PI/180)),dy=maxLat-minLat;
   const scale=Math.min(480/Math.max(dx,.00001),200/Math.max(dy,.00001));
   const point=p=>({x:300+(Number(p.lon)-(minLon+maxLon)/2)*Math.max(.01,Math.cos((minLat+maxLat)/2*Math.PI/180))*scale,y:146-(Number(p.lat)-(minLat+maxLat)/2)*scale});
   return `<div class="tower-stage"><span class="map-key">TOWER OBSERVATIONS</span><span class="north">↑ N</span><svg viewBox="0 0 600 290" aria-label="Coordinate plot of observed towers">${unique.map((p,i)=>{
     const {x,y}=point(p);
-    return `<g class="graph-node" role="button" tabindex="0" aria-label="Inspect tower ${esc(p.name || p.cell)}" data-action="rows" data-value="${esc(JSON.stringify(valid.filter(r=>r.cell===p.cell).map(r=>r.recordId)))}"><title>${esc(p.name || p.cell)}</title><circle cx="${x}" cy="${y}" r="18" fill="#bad0fc" fill-opacity=".65"/><circle cx="${x}" cy="${y}" r="10" fill="#234eb7"/><text x="${x}" y="${y+4}" text-anchor="middle" font-size="11" fill="#fff">${i+1}</text></g>`;
-  }).join('')}</svg><div class="map-legend">${unique.map((p,i)=>`<span><b>${i+1}</b>${esc(p.name || p.cell)}</span>`).join('')}</div></div>`;
+    return `<g class="graph-node" role="button" tabindex="0" aria-label="Inspect tower ${esc(p.name || p.cell)}" data-action="rows" data-value="${esc(JSON.stringify(p.ids))}"><title>${esc(p.name || p.cell)}</title><circle cx="${x}" cy="${y}" r="18" fill="#bad0fc" fill-opacity=".65"/><circle cx="${x}" cy="${y}" r="10" fill="#234eb7"/><text x="${x}" y="${y+4}" text-anchor="middle" font-size="11" fill="#fff">${i+1}</text></g>`;
+  }).join('')}</svg><div class="map-legend">${unique.slice(0,12).map((p,i)=>`<span><b>${i+1}</b>${esc(p.name || p.cell)}</span>`).join('')}</div>${grouped.size>300?'<p class="panel-note">First 300 cell sites shown. Filter by party or date for a smaller set.</p>':''}</div>`;
 }

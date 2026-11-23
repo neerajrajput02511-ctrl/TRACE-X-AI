@@ -1,0 +1,9 @@
+# Architecture
+
+TRACE-X retains the tested responsive JavaScript app, Node HTTP/SQLite backend, and native Java Android WebView. Production-style shared mode serves web and API on one origin. The Android wrapper opens that same origin with server-issued sessions. The static website/PWA has its own browser store and the native offline demo is a synthetic read-only experience.
+
+- `dist/engine.js` normalizes both operator formats, deduplicates observations without discarding source references, and computes case analytics. `dist/spatial.js` uses local Cytoscape.js and Leaflet resources. The map uses a geographic coordinate grid and makes no outside tile requests.
+- `server/team.mjs` owns authentication, case assignments, sign-off, audit events and protected routes. Schema migrations and normalized search indexes are in `server/migrations.mjs` and `server/records.mjs`. Authorization includes unit and per-case access. Existing unit-wide cases keep their baseline access until the owner or administrator assigns them explicitly.
+- `server/upload.mjs` receives bounded multipart streams and supports UTF-8 CSV, TSV and text plus single-worksheet XLSX. The server reproduces normalization before committing. The evidence vault stores original bytes by SHA-256. A workbook row citation identifies the workbook, worksheet and physical row. A duplicate observation retains its contributing original records.
+- The deterministic assistant runs approved queries. The optional local Ollama endpoint proposes an intent from restricted vocabulary. The query engine independently determines result rows and answer text. Reviewer approval is version-bound, and shared-mode PDF generation uses only an approved version.
+- Case snapshots hold case-level working data. Relational SQLite tables hold accounts, assignments, normalized search indices, custody activity and historical approvals. The data store lives on disk. No cloud service is needed for the shared demo.

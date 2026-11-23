@@ -1,4 +1,4 @@
-param([string]$GradlePath = "gradle")
+param([string]$GradlePath = (Join-Path $PSScriptRoot "gradlew.bat"))
 $ErrorActionPreference = "Stop"
 $sdkRoot = $env:ANDROID_HOME
 if (-not $sdkRoot) { $sdkRoot = Join-Path $env:LOCALAPPDATA "Android/Sdk" }
