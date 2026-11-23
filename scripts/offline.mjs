@@ -33,7 +33,14 @@ self.addEventListener('fetch',event=>{
  if(url.pathname.endsWith('/')) url.pathname+='index.html';
  url.hash='';url.search='';
  if(!ASSETS.includes(url.href)) return;
- event.respondWith((async()=>{const cache=await caches.open(CACHE);return (await cache.match(url.href))||fetch(req)})());
+ event.respondWith((async()=>{
+   try{return await fetch(req,{cache:'no-cache'});}
+   catch(error){
+     const cached=await caches.match(url.href,{cacheName:CACHE});
+     if(cached)return cached;
+     throw error;
+   }
+ })());
 });\n`;
 await fs.writeFile(root+'sw.js',script);
 console.log('Offline app shell: '+ files.length +' files, '+version);

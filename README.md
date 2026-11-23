@@ -22,6 +22,7 @@ Open http://127.0.0.1:4318/. Accounts are provisioned with unique passwords at t
     npm.cmd test
     npm.cmd run e2e
     npm.cmd run e2e:ui
+    npm.cmd run e2e:launch
     npm.cmd run benchmark -- 50000
 
 The synthetic fixture can be reset with npm.cmd run demo -- Jaipur --reset. A marked synthetic case is the only case eligible for reset. See the [validation report](VALIDATION_REPORT.md) for executed checks.

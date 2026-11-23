@@ -15,7 +15,8 @@
     "e2e": "node scripts/e2e.mjs",
     "backup": "node --env-file-if-exists=.env server/backup.mjs",
     "build": "node scripts/vendor.mjs && node scripts/offline.mjs",
-    "e2e:ui": "node tests/browser.e2e.mjs"
+    "e2e:ui": "node tests/browser.e2e.mjs",
+    "e2e:launch": "node tests/workspace-launch.e2e.mjs"
   },
   "engines": {
     "node": ">=22.16"

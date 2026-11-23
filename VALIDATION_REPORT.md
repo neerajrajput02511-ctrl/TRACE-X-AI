@@ -42,3 +42,7 @@ Sites confirmed owner-private deployment of `c322c6f` as succeeded on 23 Novembe
 ## Coverage limits
 
 The implementation extends the existing JavaScript/Node/SQLite architecture. Next.js, TypeScript checks, Tailwind, FastAPI/Pydantic and DuckDB are outside this implementation. The map runs on a local coordinate grid. XLSX supports one sheet per upload. The server verifies deterministic assistant answers and citation IDs. The independent reviewer checks the interpretation and investigator-authored report wording. Performance timing covers the engine only. Physical phones, a production police network, trusted HTTPS on an Android device, concurrent-load certification, and real operator evidence were outside the exercised environment.
+
+## Workspace launch recovery
+
+In Edge, the **Launch workspace** link reproduced the startup error when IndexedDB access was denied and when a full storage quota prevented saving the sample. After the fix, `npm.cmd run e2e:launch` passed with normal storage, a previously saved case, denied access, quota exhaustion, a temporary cited answer, restored access to the original case, the explicit read-only demo, a stale cached page, and an offline reload. The temporary session does not write case records.

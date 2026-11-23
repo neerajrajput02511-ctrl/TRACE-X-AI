@@ -1,5 +1,6 @@
 import {createDemo,createCase,importFile,previewImport,analyze,ask} from './engine.js';
 import {api,casePath,jsonRequest,listCases,saveCase} from './storage.js';
+import {DeviceStorageError} from './case-store.js';
 import {icon,esc,count,stamp,button,head,rowRefs,empty} from './case-ui.js';
 import {sections,shell,overview,sources,network,towers,devices,assistant,reports,reviewed,pageHeader} from './case-views.js';
 import {caseProfile,caseDetailsForm,assignmentForm,adminPage,adminUserForm,importPreview,importOptions} from './case-tools.js';
@@ -12,8 +13,9 @@ const views={overview,sources,network,towers,devices,assistant,reports};
 const state={view:'overview',search:'',offset:0,filters:{},serverSearch:null,searchError:'',node:'',towerSubject:'',edgeLimit:50,timelineLimit:50,deviceLimit:50,ipLimit:50,auditLimit:20};
 const aliases={graph:'network',evidence:'sources',report:'reports',map:'towers'};
 let cases=[], c=null, a=null, busy=false, noteTimer, searchToken=0, searchKey='', pendingFiles=[], adminUsers=null, adminHealth=null, adminError='', adminLoading=false;
+let temporaryDemo=false;
 const team=()=>window.TRACEX_TEAM===true;
-const readOnly=()=>!team()&&(window.TRACEX_READ_ONLY===true||(location.hostname==='appassets.androidplatform.net'&&new URLSearchParams(location.search).get('demo')==='1'));
+const readOnly=()=>!team()&&(temporaryDemo||window.TRACEX_READ_ONLY===true||new URLSearchParams(location.search).get('demo')==='1');
 const admin=()=>team()&&window.traceSession?.role==='admin';
 const archive=()=>c?.metadata?.status==='archived';
 const canCreate=()=>!readOnly()&&(!team()||['investigator','admin'].includes(window.traceSession?.role));
@@ -43,7 +45,7 @@ function selectCase(id){
   c=cases.find(x=>x.id===id)||cases[0];a=c?analyze(c):null;
   searchKey='';searchToken++;
   Object.assign(state,{search:'',offset:0,filters:{},serverSearch:null,searchError:'',node:'',towerSubject:'',edgeLimit:50,timelineLimit:50,deviceLimit:50,ipLimit:50,auditLimit:20,leadLimit:4,networkFrom:'',networkTo:'',towerFrom:'',towerTo:'',pathA:'',pathB:''});
-  if(c)remember(c.id);hideModal();render();
+  if(c&&!readOnly())remember(c.id);hideModal();render();
 }
 function accountControls(){
   if(!team() || !window.traceSession)return '';
@@ -76,7 +78,12 @@ function render(){
   if(team() && window.traceSession){
     const foot=$('.side-foot'); if(foot)foot.insertAdjacentHTML('beforebegin',`${accountControls()}`);
   }
-  if(readOnly()) $('#main').insertAdjacentHTML('afterbegin','<p class="demo-notice">Offline synthetic demo · Read-only case records. Questions are cleared when you leave the app.</p>');
+  if(readOnly()) {
+    const notice=temporaryDemo
+      ? 'Temporary demo · Browser storage is unavailable. You can explore the synthetic case and ask questions. Saving is disabled. '+button('Retry storage','retry-storage','','text-button')
+      : 'Offline synthetic demo · Read-only case records. Questions are cleared when you leave the app.';
+    $('#main').insertAdjacentHTML('afterbegin','<p class="demo-notice">'+notice+'</p>');
+  }
   document.title=sections[state.view][0]+' · TRACE-X';
   mountSpatial(c,a,state);
   if(adminView)loadAdmin();
@@ -303,6 +310,7 @@ document.addEventListener('click',async event=>{
       case 'admin-edit':if(admin())modal('Manage unit account',adminUserForm(adminUsers.find(u=>u.username===v)));break;
       case 'admin-refresh':adminUsers=null;adminError='';render();break;
       case 'refresh-case':{const id=c?.id;cases=await listCases();selectCase(id);break;}
+      case 'retry-storage':location.reload();break;
       case 'import':importModal();break;
       case 'finish-import':hideModal();nav('sources');break;
       case 'file':showFile(v);break;
@@ -419,14 +427,25 @@ document.addEventListener('click',e=>{
 async function initialise(){
   try{
     if(readOnly()){cases=[await createDemo()];selectCase(cases[0].id);return;}
-    cases=await listCases();
-    if(!cases.length && !team()){
-      const sample=await createDemo();log(sample,'Demo case opened',sample.files.length+' synthetic source files loaded.');
-      try{await saveCase(sample);cases=[sample];}catch(err){cases=await listCases();if(!cases.length)throw err;}
+    try{
+      cases=await listCases();
+      if(!cases.length && !team()){
+        const sample=await createDemo();log(sample,'Demo case opened',sample.files.length+' synthetic source files loaded.');
+        try{await saveCase(sample);cases=[sample];}catch(cause){
+          // A different tab may have saved the sample after this tab listed cases.
+          cases=await listCases();
+          if(!cases.length)throw new DeviceStorageError('The sample could not be saved to device storage.', {cause});
+        }
+      }
+    }catch(err){
+      if(team()||!(err instanceof DeviceStorageError))throw err;
+      temporaryDemo=true;
+      cases=[await createDemo()];
     }
     selectCase(remembered());
   }catch(err){
-    $('#main').innerHTML=`<section class="panel loading"><h1>Workspace could not open</h1><p>${esc(err.message)}</p><button class="button primary" id="retry-open">Try again</button></section>`;
+    const demoLink=!team()&&!readOnly()?'<a class="button" href="./console.html?demo=1">Open synthetic demo</a>':'';
+    $('#main').innerHTML=`<section class="panel loading"><h1>Workspace could not open</h1><p>${esc(err.message)}</p><button class="button primary" id="retry-open">Try again</button> ${demoLink}</section>`;
     $('#retry-open').addEventListener('click',()=>location.reload());
   }
 }
