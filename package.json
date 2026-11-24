@@ -14,9 +14,11 @@
     "check": "node scripts/check.mjs",
     "e2e": "node scripts/e2e.mjs",
     "backup": "node --env-file-if-exists=.env server/backup.mjs",
-    "build": "node scripts/vendor.mjs && node scripts/offline.mjs",
+    "build": "node scripts/vendor.mjs && node scripts/build-workbook.mjs && node scripts/offline.mjs",
     "e2e:ui": "node tests/browser.e2e.mjs",
-    "e2e:launch": "node tests/workspace-launch.e2e.mjs"
+    "e2e:launch": "node tests/workspace-launch.e2e.mjs",
+    "e2e:workbook": "node scripts/e2e-workbook.mjs",
+    "e2e:judge": "node tests/judge-workflow.e2e.mjs"
   },
   "engines": {
     "node": ">=22.16"
@@ -30,6 +32,7 @@
     "yauzl": "^3.4.0"
   },
   "devDependencies": {
+    "esbuild": "^0.28.2",
     "fflate": "^0.8.3",
     "playwright": "^1.65.1"
   }

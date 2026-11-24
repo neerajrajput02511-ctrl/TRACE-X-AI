@@ -2,6 +2,8 @@ import fs from 'node:fs/promises';
 const vendors={
   'cytoscape.js':'cytoscape/dist/cytoscape.esm.min.mjs',
   'cytoscape-LICENSE':'cytoscape/LICENSE',
+  'pdfkit.js':'pdfkit/js/pdfkit.standalone.js',
+  'pdfkit-LICENSE':'pdfkit/LICENSE',
   'leaflet.js':'leaflet/dist/leaflet-src.esm.js',
   'leaflet.css':'leaflet/dist/leaflet.css',
   'leaflet-LICENSE':'leaflet/LICENSE'
@@ -12,4 +14,4 @@ for(const [to,from] of Object.entries(vendors)){
   await fs.copyFile('node_modules/'+from,'dist/vendor/'+target);
 }
 await fs.cp('node_modules/leaflet/dist/images','dist/vendor/images',{recursive:true});
-console.log('Bundled Cytoscape.js and Leaflet for network-free use.');
+console.log('Bundled Cytoscape.js, Leaflet and PDFKit for network-free use.');

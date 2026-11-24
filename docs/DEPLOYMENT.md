@@ -1,5 +1,22 @@
 # Deployment
 
+## Public PS03 demo
+
+The public production domain hosts the standalone browser workspace and synthetic samples. Case storage and reports remain in the browser. The APK is a separate download with an offline synthetic case and a configurable team-server address. [Public demo](https://trace-x-ai-shyne.vercel.app/)
+
+To refresh the public demo, run the build and Android release scripts, link a staging directory to the existing Vercel project `trace-x-ai-shyne`, and package the build output:
+
+```powershell
+npm.cmd run build
+powershell.exe -ExecutionPolicy Bypass -File .\android\build-demo.ps1
+$stage = (New-Item -ItemType Directory ".runtime\publish-$([guid]::NewGuid().ToString('N'))").FullName
+vercel.cmd link --yes --project trace-x-ai-shyne --cwd $stage
+node scripts/package-vercel-demo.mjs $stage
+vercel.cmd deploy --prebuilt --prod --yes --cwd $stage
+```
+
+The packaging script copies allowlisted static artifacts from `dist`. The authenticated team server runs separately.
+
 ## Internal HTTPS
 
 Run Node v22.16 or newer under a dedicated operating-system account with access to the data directory. Set `TRACEX_HOST=127.0.0.1`, `TRACEX_PORT=4318`, an absolute `TRACEX_DB`, and `TRACEX_SECURE_COOKIES=1`. Terminate TLS using a certificate trusted by the computers and Android devices. Reverse proxy the same origin, preserve the public `Host` header for origin checks, and configure a request body limit of approximately 11 MB for uploads. Avoid logging request bodies or evidence URLs with sensitive query parameters.

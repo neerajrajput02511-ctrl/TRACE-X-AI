@@ -71,3 +71,15 @@ node '.runtime/public-data-validation/validate-cesnet.mjs'
 ```
 
 The CESNET extracted prefix SHA-256 is `34db995aaa73c767944329cfb11df13daabc5f5bd169120d94749ab558dc9827`. The imported CSV SHA-256 is `055566df06d7d5e3dcb420d6fbaa7fa9e90830028b3872676f55fdc884f85660`. The Helsinki working CSV SHA-256 is `ef791e21d6dcc4c676ffb4754a8416dfd2e1ade62dc54ed3ae07247453e9fe00`.
+
+## Public PS03 release
+
+The public demo landing and workspace returned HTTP 200 from the production Vercel origin without a session. The APK download returned 1,244,332 bytes matching the locally signed release. [Live PS03 demo](https://trace-x-ai-shyne.vercel.app/)
+
+- `npm.cmd run check` passed across 50 JavaScript modules. `npm.cmd test` passed 28 tests with zero failures.
+- `npm.cmd run e2e`, `npm.cmd run e2e:ui`, `npm.cmd run e2e:launch` and `npm.cmd run e2e:workbook` passed locally. They exercised the investigator-reviewer boundary, indexed search, session failure and retry, browser storage recovery, malformed workbooks and binary evidence downloads.
+- `$env:TRACEX_LIVE_URL='https://trace-x-ai-shyne.vercel.app'; npm.cmd run e2e:judge` passed in a fresh Edge session. It used the landing button, shared-contact path, exact evidence rows, version-bound PDF export, XLSX worksheet provenance, original-byte download and mobile read-only layout. It also downloaded the synthetic ZIP and successfully imported the two independent CDR formats, the IPDR file and the tower register into a new case.
+- Initial hosted browser attempts hit one browser-process permission error and one 12-second navigation timeout. The subsequent public run used Edge and a 45-second navigation allowance and completed every assertion.
+- The Android 1.2 APK passed Android's v2 signature check and installed and launched on the API 36 emulator. SHA-256 `4a3b97e3cf37984ee201555da1240ffe178cb116e227d19145bd3d268f1e7b47`.
+
+The public environment uses browser-local storage and local demo sign-off. Account-based reviewer authorization runs on the separately configured team server. The evaluation used the team's synthetic fixture and checked it against the official PS03 scope. [Official PS03 details](https://rajasthanpolicehackathon.in/#ps03)

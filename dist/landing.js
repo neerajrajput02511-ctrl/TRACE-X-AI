@@ -34,16 +34,72 @@ function paint() {
     ctx.strokeStyle=level>57?'rgba(87,158,252,.74)':'rgba(78,143,226,.48)';ctx.lineWidth=level>57?1.05:.9;ctx.stroke();
   }
 }
-let scheduled;new ResizeObserver(()=>{cancelAnimationFrame(scheduled);scheduled=requestAnimationFrame(paint)}).observe(canvas);
-const labels={A:['SUBJECT A','A placed a call to contact X'],B:['SUBJECT B','B placed a call to contact X'],X:['SELECTED CONNECTION','A and B share contact X']};
-document.querySelectorAll('.marker').forEach(el=>el.addEventListener('click',()=>{
-  document.querySelectorAll('.marker').forEach(other=>{other.classList.toggle('active',other===el);other.setAttribute('aria-pressed',String(other===el))});
-  const [label,title]=labels[el.dataset.item];document.getElementById('panel-label').textContent=label;document.getElementById('panel-title').textContent=title;
-}));
+if (ctx && 'ResizeObserver' in window) {
+  let scheduled;
+  new ResizeObserver(() => {
+    cancelAnimationFrame(scheduled);
+    scheduled = requestAnimationFrame(paint);
+  }).observe(canvas);
+}
+
+const connections = {
+  A: ['Record R102', 'A placed a call to contact X'],
+  B: ['Record R109', 'B placed a call to contact X'],
+  X: ['Records R102 and R109', 'A and B share contact X'],
+};
+const markers = document.querySelectorAll('.marker');
+const readoutLabel = document.querySelector('#panel-label');
+const readoutTitle = document.querySelector('#panel-title');
+for (const marker of markers) {
+  marker.addEventListener('click', () => {
+    for (const candidate of markers) {
+      candidate.classList.toggle('active', candidate === marker);
+      candidate.setAttribute('aria-pressed', String(candidate === marker));
+    }
+    const [label, title] = connections[marker.dataset.item];
+    readoutLabel.textContent = label;
+    readoutTitle.textContent = title;
+  });
+}
+
+const workspaceMode = document.querySelector('#workspace-mode');
+const bundled = location.hostname === 'appassets.androidplatform.net';
+if (window.TRACEX_TEAM) {
+  workspaceMode.textContent = 'Sign in with your team account. Your reviewer should use a separate account before report export.';
+  document.querySelectorAll('[data-browser-only]').forEach(element => { element.hidden = true; });
+} else if (bundled) {
+  workspaceMode.textContent = 'The Android app includes a read-only synthetic case.';
+  document.querySelectorAll('[data-field-section], [data-browser-write]').forEach(element => { element.hidden = true; });
+  for (const link of document.querySelectorAll('a[href^="./console.html"]')) {
+    const target = new URL(link.href);
+    target.searchParams.set('demo', '1');
+    link.href = target.href;
+  }
+}
+
 let promptEvent;
-window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();promptEvent=e});
-const help=document.querySelector('#install-help');
-document.querySelector('#install-button').addEventListener('click',async()=>{
-  if(promptEvent){await promptEvent.prompt();await promptEvent.userChoice;promptEvent=null;return}
-  help.hidden=false;help.textContent=matchMedia('(display-mode: standalone)').matches?'This web app is already installed.':/iPad|iPhone/i.test(navigator.userAgent)?'In Safari, tap Share, then Add to Home Screen.':'Open your browser menu and choose Install app or Add to Home screen when available.';
+window.addEventListener('beforeinstallprompt', event => {
+  event.preventDefault();
+  promptEvent = event;
+});
+const help = document.querySelector('#install-help');
+document.querySelector('#install-button').addEventListener('click', async () => {
+  if (promptEvent) {
+    const event = promptEvent;
+    promptEvent = undefined;
+    try {
+      await event.prompt();
+      return;
+    } catch {
+      // Offer manual install instructions if the browser prompt is unavailable.
+    }
+  }
+  help.hidden = false;
+  if (matchMedia('(display-mode: standalone)').matches) {
+    help.textContent = 'This web app is already installed.';
+  } else if (/iPad|iPhone/i.test(navigator.userAgent)) {
+    help.textContent = 'In Safari, tap Share, then Add to Home Screen.';
+  } else {
+    help.textContent = 'Open your browser menu and choose Install app or Add to Home screen when available.';
+  }
 });

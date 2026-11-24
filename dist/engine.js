@@ -7,7 +7,7 @@ const HEADER = {
   subscriber: ['subscriber','subscriberid','msisdn','mobilenumber','subscribernumber','subject','subjectnumber'],
   peer: ['peer','otherparty','otherpartynumber','counterparty','contactnumber'],
   direction: ['direction','calldirection','calltype'],
-  time: ['startts','timestamp','starttime','datetime','calldatetime','sessionstart','startdatetime','callstart','sessionstarttime','eventtime'],
+  time: ['startts','timestamp','starttime','datetime','calldatetime','sessionstart','startdatetime','callstart','sessionstarttime','eventtime','timefirst','flowstart'],
   date: ['date','calldate','sessiondate','startdate'],
   clock: ['time','calltime','localtime'],
   duration: ['duration','durationsec','durationseconds','callduration','durationsecs'],
@@ -19,7 +19,8 @@ const HEADER = {
   destinationIp: ['destinationip','dstip','remoteip','destinationaddress'],
   destinationPort: ['destinationport','dstport','remoteport'],
   protocol: ['protocol','transportprotocol','transport','proto'],
-  end: ['endts','endtime','sessionend','enddatetime','sessionendtime'],
+  service: ['service','servicename','application','applicationname','app','appname','trafficlabel'],
+  end: ['endts','endtime','sessionend','enddatetime','sessionendtime','timelast','flowend'],
   name: ['name','towername','sitename','location','site','sitelabel','locality'],
   lat: ['lat','latitude','towerlatitude'],
   lon: ['lon','lng','longitude','towerlongitude']
@@ -42,11 +43,29 @@ export function createCase(name = 'Untitled case') {
     createdAt:new Date().toISOString(), files:[], records:[], towers:[], subjects:[]};
 }
 
+function headerDelimiter(text) {
+  const delimiters=[',','\t',';'], counts=new Map(delimiters.map(value=>[value,0]));
+  let quoted=false, content=false;
+  for(let i=0;i<text.length;i++) {
+    const char=text[i];
+    if(char==='"') {
+      if(quoted&&text[i+1]==='"') {i++;continue;}
+      quoted=!quoted;content=true;
+    } else if(!quoted) {
+      if(char==='\r'||char==='\n') {
+        if(content)break;
+        for(const delimiter of delimiters)counts.set(delimiter,0);
+      } else if(counts.has(char)) counts.set(char,counts.get(char)+1);
+      else if(char.trim())content=true;
+    }
+  }
+  return delimiters.sort((a,b)=>counts.get(b)-counts.get(a))[0];
+}
+
 // Keep each record's original physical starting line, including multiline CSV fields.
 function parseDelimited(input) {
   const text = input.replace(/^\uFEFF/, '');
-  const first = text.split(/\r\n|\r|\n/)[0];
-  const delimiter = [',','\t',';'].sort((a,b) => first.split(b).length - first.split(a).length)[0];
+  const delimiter = headerDelimiter(text);
   const rows = [];
   let values = [], value = '', quoted = false, closed = false, line = 1, startLine = 1, start = 0;
   function emit(end) {
@@ -96,7 +115,7 @@ function parseTime(value, offset = IST) {
   return new Date(utc.getTime()-offset*60000).toISOString();
 }
 
-const fingerprint = record => JSON.stringify([record.kind, record.from,record.to,record.time,record.duration,record.cell,record.imei,record.imsi,record.ip,record.port,record.protocol,record.end,record.observer,record.destinationIp||'',record.destinationPort||'']);
+const fingerprint = record => JSON.stringify([record.kind, record.from,record.to,record.time,record.duration,record.cell,record.imei,record.imsi,record.ip,record.port,record.protocol,record.end,record.observer,record.destinationIp||'',record.destinationPort||'',record.service||'']);
 function validateAddress(address) {
   if (address.includes(':')) {try {new URL('http://['+address+']/');} catch {throw new Error('Invalid IPv6 address.');}}
   else if (!/^\d{1,3}(?:\.\d{1,3}){3}$/.test(address) || address.split('.').some(x=>+x>255)) throw new Error('Invalid IPv4 address.');
@@ -137,7 +156,8 @@ function parseRow(get, type, offset) {
   const end=get('end') ? parseTime(get('end'),offset) : '';
   if (end && end<time) throw new Error('Session ends before its start.');
   const destinationIp=get('destinationIp'), destinationPort=type==='IPDR'?portValue(get('destinationPort')):'';
-  return {kind:type,from,to:type==='CDR'?to:'',time,duration,cell:get('cell'),imei:get('imei'),imsi:get('imsi'),ip,port:portValue(port),protocol,end,observer:subscriber || from,...(destinationIp?{destinationIp}:{}),...(destinationPort?{destinationPort}:{})};
+  const service=type==='IPDR'?get('service'):'';
+  return {kind:type,from,to:type==='CDR'?to:'',time,duration,cell:get('cell'),imei:get('imei'),imsi:get('imsi'),ip,port:portValue(port),protocol,end,observer:subscriber || from,...(destinationIp?{destinationIp}:{}),...(destinationPort?{destinationPort}:{}),...(service?{service}:{})};
 }
 
 async function getDelimitedInput(input) {
@@ -263,11 +283,38 @@ function deviceChanges(records) {
   return changes;
 }
 
+function callTotals() {
+  return {count:0,incoming:0,outgoing:0,self:0,seconds:0,knownDurations:0,nightCount:0,first:null,last:null,ids:[]};
+}
+
+function observeCall(stats,call,party,hour=Number(istTime(call.time).slice(0,2))) {
+  const ref={time:call.time,id:call.id};
+  stats.count++;stats.ids.push(call.id);
+  stats.first??=ref;stats.last=ref;
+  if(call.from===party&&call.to===party)stats.self++;
+  else if(call.from===party)stats.outgoing++;
+  else if(call.to===party)stats.incoming++;
+  if(Number.isFinite(call.duration)) {stats.seconds+=call.duration;stats.knownDurations++;}
+  if(hour>=22||hour<6)stats.nightCount++;
+}
+
+function recordedServices(records,party) {
+  const groups=new Map();
+  for(const row of records) {
+    if(row.kind!=='IPDR'||!row.service||(party&&row.from!==party))continue;
+    if(!groups.has(row.service))groups.set(row.service,{name:row.service,count:0,ids:[]});
+    const group=groups.get(row.service);
+    group.count++;group.ids.push(row.id);
+  }
+  return [...groups.values()].sort((a,b)=>b.count-a.count||order(a.name,b.name));
+}
+
 export function analyze(c) {
   const records=[...c.records].sort(timestampOrder), nodesById=new Map(),edgesById=new Map();
   const towersById=new Map(c.towers.map(t=>[t.cell,t])), timeline=[],devices=[];
   let cdrCount=0, duration=0;
   const days=new Map(), nightIds=[], durationIds=[];
+  const hours=Array.from({length:24},(_,hour)=>({hour,count:0,ids:[]}));
   for (const r of records) {
     const subject=r.observer || r.from;
     if(r.cell) {
@@ -284,14 +331,15 @@ export function analyze(c) {
     if(Number.isFinite(r.duration)){duration+=r.duration;bucket.duration+=r.duration;durationIds.push(r.id);}
     const hour=Number(localTime.slice(11,13));
     if(hour>=22||hour<6)nightIds.push(r.id);
+    hours[hour].count++;hours[hour].ids.push(r.id);
     for(const id of new Set([r.from,r.to])) {
-      if(!nodesById.has(id)) nodesById.set(id,{id,count:0,ids:[]});
-      const n=nodesById.get(id);n.count++;n.ids.push(r.id);
+      if(!nodesById.has(id)) nodesById.set(id,{id,...callTotals()});
+      observeCall(nodesById.get(id),r,id,hour);
     }
     const [source,target]=[r.from,r.to].sort(order), key=JSON.stringify([source,target]);
-    if(!edgesById.has(key)) edgesById.set(key,{source,target,count:0,forward:0,reverse:0,seconds:0,ids:[]});
+    if(!edgesById.has(key)) edgesById.set(key,{source,target,count:0,forward:0,reverse:0,seconds:0,knownDurations:0,ids:[]});
     const edge=edgesById.get(key);edge.count++;edge.ids.push(r.id);
-    edge.seconds+=r.duration||0;
+    if(Number.isFinite(r.duration)){edge.seconds+=r.duration;edge.knownDurations++;}
     if(r.from===source)edge.forward++;else edge.reverse++;
   }
   const nodes=[...nodesById.values()].sort((a,b)=>b.count-a.count || order(a.id,b.id));
@@ -336,19 +384,112 @@ export function analyze(c) {
     deviceParties.get(d.imei).set(d.subject,d.recordId);
   }
   const sharedDevices=[...deviceParties].filter(([,parties])=>parties.size>1).map(([imei,parties])=>({imei,subjects:[...parties.keys()],ids:[...parties.values()]}));
-  return {total:records.length,contacts:nodes.length,cdrCount,ipdrCount:records.length-cdrCount,nodes,edges,leads,timeline,devices,changes,topContacts:nodes,
-    callStats:{duration,durationIds,nightIds,days:[...days.values()]},sharedDevices};
+  const peakHour=cdrCount?hours.reduce((peak,bucket)=>bucket.count>peak.count?bucket:peak):null;
+  return {total:records.length,contacts:nodes.length,cdrCount,ipdrCount:records.length-cdrCount,nodes,edges,leads,timeline,devices,changes,topContacts:nodes,ipServices:recordedServices(records),
+    callStats:{duration,durationIds,nightIds,days:[...days.values()],parties:nodes,peakHour,repeatedPairs:edges.filter(e=>e.count>1)},sharedDevices};
 }
 
 const fail = text => ({text,supported:false,ids:[]});
 const success = (text,ids) => ({text,supported:true,ids:unique(ids)});
 const istParts = iso => new Date(new Date(iso).getTime()+IST*60000).toISOString();
 const istTime = iso => istParts(iso).slice(11,16);
-const templateHelp='I can check shared contacts, direct calls, top contacts, tower visits, device changes, IP sessions, missing source ports or a call time window. Choose a suggested question.';
+const displayTime = iso => istParts(iso).slice(0,16).replace('T',' ')+' IST';
+const templateHelp='I can check shared contacts, call activity, tower observations, identifier changes or IP sessions. Choose a suggested question.';
+const ident='([\\p{L}\\d_+.-]{1,70})';
+const re=pattern=>new RegExp('^'+pattern+'$','iu');
+const dateToken='(\\d{4}-\\d{2}-\\d{2})';
+const clockWindow=re('(?:show |list |find )?calls?(?: (?:for|of) '+ident+')? (?:between|from) (\\d{2}:\\d{2}) (?:and|to) (\\d{2}:\\d{2})(?: on '+dateToken+')?(?: ist)?');
+const dateSuffix = re('(.+?) (?:on '+dateToken+'|(?:between|from) '+dateToken+' (?:and|to|through) '+dateToken+')(?: ist)?');
+const insightsQuestion=re('(?:show |list |summarize |summarise |analyze |analyse )?(?:the )?(call activity|call summary|call patterns|call history|call duration|first and last calls|incoming calls|outgoing calls|incoming and outgoing calls|repeated contacts|repeat contacts|night calls|late[- ]night calls|calls) (?:for|of|involving) '+ident);
+const sessionQuestion=/^(?:show |find |list )?(?:ipdr |ip )?sessions? (?:for|on|with) ([0-9a-f:.]+)(?: (?:port|source port) (\d+))?(?: (?:at|on) (\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?: ?(?:Z|UTC|IST|[+-]\d{2}:?\d{2}))?))?(?: (tcp|udp))?$/i;
 
 function resolveEntity(c,input) {
   const norm=normEntity(input);
   return c.records.some(r=>r.from===norm || r.to===norm || r.observer===norm)?norm:null;
+}
+
+function callWindow(c, identifier, from, to, date) {
+  const entity=identifier?resolveEntity(c,identifier):null;
+  if(identifier&&!entity)return fail('That identifier is absent from this case.');
+  if(![from,to].every(t=>/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(t)))return fail('Enter a valid IST time window.');
+  let start,end;
+  if(date) {
+    try {
+      start=Date.parse(parseTime(date+' '+from));
+      end=Date.parse(parseTime(date+' '+to))+(from>to?86400000:0)+59999;
+    } catch {return fail('Enter a valid IST calendar date.');}
+  }
+  const calls=c.records.filter(r=>{
+    if(r.kind!=='CDR'||(entity&&r.from!==entity&&r.to!==entity))return false;
+    if(date) {const at=Date.parse(r.time);return at>=start&&at<=end;}
+    const t=istTime(r.time);
+    return from<=to?t>=from&&t<=to:t>=from||t<=to;
+  });
+  if(!calls.length)return fail('No call rows match this IST time window.');
+  const window=date?displayTime(new Date(start).toISOString())+' to '+displayTime(new Date(end).toISOString()):from+' to '+to+' IST';
+  return success(calls.length+' call record(s)'+(entity?' for '+entity:'')+' fall in the requested window ('+window+').',refIds(calls));
+}
+
+function describeCalls(c,identifier,category) {
+  const party=resolveEntity(c,identifier);
+  if(!party)return fail('That identifier is absent from this case.');
+  const calls=c.records.filter(r=>r.kind==='CDR'&&(r.from===party||r.to===party)).sort(timestampOrder);
+  if(!calls.length)return fail('No matching call records for '+party+' in this case.');
+  if(category==='first and last calls') {
+    const first=calls[0],last=calls.at(-1);
+    return success('First call for '+party+' at '+displayTime(first.time)+'. Last call at '+displayTime(last.time)+'.',[first.id,last.id]);
+  }
+  if(category==='incoming calls'||category==='outgoing calls') {
+    const directional=calls.filter(r=>category==='incoming calls'?r.to===party&&r.from!==party:r.from===party&&r.to!==party);
+    return directional.length?success(directional.length+' '+category+' for '+party+'.',refIds(directional)):fail('No '+category+' for '+party+' in the imported records.');
+  }
+  if(/night calls$/.test(category)) {
+    const night=calls.filter(r=>{const hour=Number(istTime(r.time).slice(0,2));return hour>=22||hour<6;});
+    return night.length?success(night.length+' call record(s) for '+party+' between 22:00 and 05:59 IST.',refIds(night)):fail('No rows for '+party+' match the 22:00–05:59 IST night window.');
+  }
+  if(category==='repeated contacts'||category==='repeat contacts') {
+    const byContact=new Map();
+    for(const r of calls) {
+      const peer=r.from===party?r.to:r.from;
+      if(peer===party)continue;
+      if(!byContact.has(peer))byContact.set(peer,[]);
+      byContact.get(peer).push(r.id);
+    }
+    const repeats=[...byContact].filter(([,ids])=>ids.length>1).sort((a,b)=>b[1].length-a[1].length||order(a[0],b[0])).slice(0,5);
+    if(!repeats.length)return fail('The imported rows do not establish a repeat contact for '+party+'.');
+    return success('Repeated contacts for '+party+' (up to five): '+repeats.map(([peer,ids])=>peer+' ('+ids.length+' calls)').join(', ')+'.',repeats.flatMap(([,ids])=>ids));
+  }
+  const stats=callTotals();
+  for(const call of calls)observeCall(stats,call,party);
+  const counted=stats.count+' call record(s) for '+party+' ('+stats.incoming+' incoming, '+stats.outgoing+' outgoing'+(stats.self?', '+stats.self+' self-addressed':'')+').';
+  const duration=stats.knownDurations?' Recorded duration is '+stats.seconds.toLocaleString('en-IN',{maximumFractionDigits:3})+' seconds across '+stats.knownDurations+' of those rows.':' No duration is recorded in those rows.';
+  return success(counted+duration+' First call at '+displayTime(stats.first.time)+'. Last call at '+displayTime(stats.last.time)+'.',stats.ids);
+}
+
+function addressKey(ip) {
+  return ip.includes(':')?new URL('http://['+ip+']/').hostname.slice(1,-1):ip.split('.').map(Number).join('.');
+}
+
+const protocolKey=value=>value==='6'?'TCP':value==='17'?'UDP':value.toUpperCase();
+
+function describeSessions(c,ip,inputPort,when,protocol) {
+  try {validateAddress(ip);} catch {return fail('Enter a valid IPv4 or IPv6 source address.');}
+  let port,time;
+  try {port=portValue(inputPort);} catch {return fail('Enter a valid source port.');}
+  try {time=when?parseTime(when):null;} catch {return fail('Enter a valid timestamp.');}
+  const address=addressKey(ip), requestedProtocol=protocol?.toUpperCase();
+  // A start with an unknown end cannot rule out an overlap after that start.
+  const sessions=c.records.filter(r=>r.kind==='IPDR'&&addressKey(r.ip)===address
+    &&(!port||!r.port||r.port===port)&&(!requestedProtocol||!r.protocol||protocolKey(r.protocol)===requestedProtocol)
+    &&(!time||(r.time<=time&&(!r.end||r.end>=time))));
+  if(!sessions.length)return fail('No matching session is present in the supplied IPDR rows.');
+  const omitted=[!port&&'source port',!time&&'exact time',!requestedProtocol&&'transport protocol'].filter(Boolean);
+  const gaps=[sessions.some(r=>!r.port)&&'source port',sessions.some(r=>!r.protocol)&&'protocol',sessions.some(r=>!r.end)&&'session end'].filter(Boolean);
+  const ambiguous=omitted.length||gaps.length||sessions.length!==1;
+  const result=ambiguous?'Attribution is inconclusive. ':'One recorded session matches the supplied IP, port, protocol and time. ';
+  const count=sessions.length+' candidate session(s) for '+ip+'.';
+  const why=(omitted.length?' Query did not specify '+omitted.join(', ')+'.':'')+(gaps.length?' Candidate records omit '+gaps.join(', ')+'.':'');
+  return success(result+count+why,refIds(sessions));
 }
 
 function commonAnswer(c,left,right,direct,hindi) {
@@ -367,35 +508,56 @@ function commonAnswer(c,left,right,direct,hindi) {
 }
 
 export function ask(c,question) {
-  const q=safeText(question).replace(/[?!.।]+$/,'').replace(/\s+/g,' ').trim(), hindi=/[\u0900-\u097f]/.test(q);
+  const q=safeText(question).replace(/[?!.।]+$/,'').replace(/\s+/g,' ').trim();
   if(!c.records.length) return fail('Import a CDR or IPDR file to ask a question about this case.');
+  const date=dateSuffix.exec(q);
+  if(!date)return askApproved(c,q);
+  const [,text,day,from,to]=date,start=day||from,end=day||to;
+  try {parseTime(start+' 00:00');parseTime(end+' 00:00');if(start>end)throw new Error();}
+  catch {return fail('Enter a valid date range in YYYY-MM-DD order.');}
+  const fullWindow=clockWindow.exec(q);
+  if(fullWindow)return callWindow(c,...fullWindow.slice(1));
+  const scoped={...c,records:c.records.filter(record=>{
+    const day=istParts(record.time).slice(0,10);
+    return day>=start&&day<=end;
+  })};
+  if(!scoped.records.length)return fail('No imported observations fall within this IST date range.');
+  const answer=askApproved(scoped,text);
+  if(answer.supported)answer.text+=' Records are scoped to '+(start===end?start:start+' through '+end)+' IST by start time.';
+  return answer;
+}
+
+function askApproved(c,q) {
+  const hindi=/[\u0900-\u097f]/.test(q);
   let m;
-  const ident='([\\p{L}\\d_+.-]{1,70})';
-  const re=pattern=>new RegExp('^'+pattern+'$','iu');
+  if((m=clockWindow.exec(q)))return callWindow(c,...m.slice(1));
+  if((m=insightsQuestion.exec(q)))return describeCalls(c,m[2],m[1].toLowerCase());
+  if((m=re('how many calls (?:involve|involved|were recorded for) '+ident).exec(q)))return describeCalls(c,m[1],'calls');
+  if((m=re('(?:show|list|find) (?:recorded |reported )?(?:apps?|applications?|services?|service labels)(?: for '+ident+')?').exec(q))) {
+    const party=m[1]?resolveEntity(c,m[1]):null;
+    if(m[1]&&!party)return fail('That identifier is absent from this case.');
+    const labels=recordedServices(c.records,party).slice(0,5);
+    if(!labels.length)return fail('The imported IPDR rows have no service labels for the requested scope. Service identification requires a named source field.');
+    const summary=labels.map(s=>s.name+' ('+s.count+' sessions)').join(', ');
+    return success('Recorded service labels'+(party?' for '+party:'')+' (up to five) include '+summary+'. Labels come from the cited source rows.',labels.flatMap(s=>s.ids));
+  }
   if (/^(?:(?:show|list|find|what) )?(?:ipdr|ip) (?:matches|sessions|records) (?:that have |have |with )?(?:missing|no) (?:source )?ports?(?: information)?$/i.test(q)) {
     const rows=c.records.filter(r=>r.kind==='IPDR'&&!r.port);
     return rows.length?success(rows.length+' recorded session(s) have no source port. Identification from those sessions may be ambiguous.',refIds(rows)):fail('No imported IPDR rows with a missing source port match this query.');
-  }
-  if ((m=re('(?:show |list )?(?:tower activity|tower observations|tower timeline)(?: for| of) '+ident+' (?:between|from) (\\d{4}-\\d{2}-\\d{2}) (?:and|to) (\\d{4}-\\d{2}-\\d{2})').exec(q))) {
-    const entity=resolveEntity(c,m[1]);
-    if(!entity)return fail('That identifier is absent from this case.');
-    try {parseTime(m[2]+' 00:00');parseTime(m[3]+' 00:00');if(m[2]>m[3])throw new Error();}
-    catch {return fail('Enter a valid date range in YYYY-MM-DD order.');}
-    const rows=analyze(c).timeline.filter(v=>v.subject===entity&&istParts(v.time).slice(0,10)>=m[2]&&istParts(v.time).slice(0,10)<=m[3]);
-    return rows.length?success(rows.length+' tower observation(s) for '+entity+' in the requested IST date range.',rows.map(v=>v.recordId)):fail('No tower observations for that identifier in the requested range.');
   }
   if (/^(?:show |list |find )?(?:night calls|late[- ]night calls|unusual calling hours|night activity)$/i.test(q)) {
     const ids=analyze(c).callStats.nightIds;
     return ids.length?success(ids.length+' call(s) were recorded between 22:00 and 05:59 IST.',ids):fail('No rows match the 22:00–05:59 IST night window.');
   }
   if((m=re('(?:which|what)(?: contacts?| numbers?)? (?:do|are) '+ident+' and '+ident+' (?:share|sharing)').exec(q))
+    ||(m=re('(?:which|what) (?:contacts?|numbers?) (?:are )?(?:shared by|common to) '+ident+' and '+ident).exec(q))
     ||(m=re('(?:show |find |list |what are |which are )?(?:the )?(?:shared|common) (?:contacts?|numbers?) (?:between|for|of) '+ident+' and '+ident).exec(q))
     ||(m=re(ident+' और '+ident+' के (?:साझा|कॉमन) संपर्क(?: कौन हैं| बताओ| दिखाओ)?').exec(q))) return commonAnswer(c,m[1],m[2],false,hindi);
-  if((m=re('(?:did|does|has) '+ident+' (?:call|contact|called|contacted) '+ident+'(?: directly)?').exec(q))
-    ||(m=re('(?:show |find |any |are there )?direct calls? between '+ident+' and '+ident).exec(q))
+  if((m=re('(?:how many times )?(?:did|does|has) '+ident+' (?:call|contact|called|contacted) '+ident+'(?: directly)?').exec(q))
+    ||(m=re('(?:show |find |any |are there (?:any )?|were there (?:any )?)?(?:direct )?calls? between '+ident+' and '+ident).exec(q))
     ||(m=re('क्या '+ident+' (?:ने )?'+ident+' (?:को |से )?(?:सीधे )?कॉल (?:किया|की)').exec(q))) {
     // A directional verb must never count calls in the reverse direction.
-    if(/^(did|does|has|क्या) /iu.test(q)) {
+    if(/^(?:(?:how many times )?(?:did|does|has)|क्या) /iu.test(q)) {
       const a=resolveEntity(c,m[1]),b=resolveEntity(c,m[2]);
       if(!a || !b || a===b) return fail(hindi?'दो अलग और उपलब्ध नंबर चुनें।':'Choose two different identifiers present in this case.');
       const calls=c.records.filter(r=>r.kind==='CDR' && r.from===a && r.to===b);
@@ -404,7 +566,7 @@ export function ask(c,question) {
     }
     return commonAnswer(c,m[1],m[2],true,hindi);
   }
-  if((m=re('(?:show |list |what is |what are )?(?:the )?(tower timeline|tower visits|tower locations|repeated tower locations|device changes|imei changes|sim changes|device history|imei/sim changes)(?: for| of) '+ident).exec(q))
+  if((m=re('(?:show |list |what is |what are )?(?:the )?(tower timeline|tower activity|tower observations|tower visits|tower locations|repeated tower locations|device changes|imei changes|sim changes|device history|imei/sim changes)(?: for| of) '+ident).exec(q))
     ||(m=re(ident+' (?:की|का|के) (टावर टाइमलाइन|टावर लोकेशन|डिवाइस बदलाव|सिम बदलाव)(?: दिखाओ| बताओ)?').exec(q))) {
     const category=(hindi?m[2]:m[1]).toLowerCase(), entity=resolveEntity(c,hindi?m[1]:m[2]);
     if(!entity) return fail('That identifier is absent from this case.');
@@ -432,20 +594,7 @@ export function ask(c,question) {
     if(!top.length) return fail('No matching call records in this case.');
     return success((hindi?'कॉल रिकॉर्ड के अनुसार प्रमुख संपर्क। ':'Most frequent contacts by call-record count'+(entity?' for '+entity:'')+'. ')+top.map(([id,ids])=>id+' ('+ids.length+')').join(', ')+'.',top.flatMap(([,ids])=>ids));
   }
-  if((m=/^(?:show |find |list )?(?:ipdr |ip )?sessions? (?:for|on|with) ([0-9a-f:.]+)(?: (?:port|source port) (\d+))?(?: (?:at|on) (\d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})?(?:Z| IST)?))?(?: (tcp|udp))?$/i.exec(q))) {
-    const [,ip,port,when,protocol]=m;
-    let time; try {time=when?parseTime(when):null;} catch {return fail('Enter a valid timestamp.');}
-    const sessions=c.records.filter(r=>r.kind==='IPDR'&&r.ip.toLowerCase()===ip.toLowerCase()&&(!port||!r.port||r.port===port)&&(!time||(r.time<=time && (r.end||r.time)>=time))&&(!protocol||!r.protocol||r.protocol===protocol.toUpperCase()));
-    if(!sessions.length) return fail('No matching session is present in the supplied IPDR rows.');
-    const ambiguous=!port||!time||!protocol||sessions.length!==1||sessions.some(r=>!r.port||!r.protocol);
-    return success((ambiguous?'Attribution is inconclusive. ':'One recorded session matches the supplied IP, port, protocol and time. ')+sessions.length+' candidate session(s) for '+ip+'.',refIds(sessions));
-  }
-  if((m=/^(?:show |list |find )?calls? (?:between|from) (\d{2}:\d{2}) (?:and|to) (\d{2}:\d{2})(?: (?:on) (\d{4}-\d{2}-\d{2}))?(?: ist)?$/i.exec(q))) {
-    if(![m[1],m[2]].every(t=>/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(t))) return fail('Enter a valid IST time window.');
-    const calls=c.records.filter(r=>{const t=istTime(r.time);return r.kind==='CDR' && (!m[3]||istParts(r.time).slice(0,10)===m[3]) && (m[1]<=m[2]?t>=m[1]&&t<=m[2]:t>=m[1]||t<=m[2]);});
-    if(!calls.length)return fail('No call rows match this IST time window.');
-    return success(calls.length+' call record(s) fall in the requested IST window.',refIds(calls));
-  }
+  if((m=sessionQuestion.exec(q)))return describeSessions(c,...m.slice(1));
   return fail(hindi?'साझा संपर्क, सीधे कॉल, टावर टाइमलाइन या डिवाइस बदलाव के बारे में पूछें।':templateHelp);
 }
 

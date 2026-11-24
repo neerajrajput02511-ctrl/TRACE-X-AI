@@ -9,7 +9,7 @@ const fields={
   time:'Timestamp',date:'Date',clock:'Clock time',direction:'Direction',duration:'Duration (seconds)',
   cell:'Cell ID',imei:'IMEI / device ID',imsi:'IMSI / SIM ID',ip:'Public source IP',port:'Source port',
   destinationIp:'Destination IP',destinationPort:'Destination port',protocol:'Transport protocol',end:'Session end',
-  session:'Session identifier',name:'Tower name',lat:'Latitude',lon:'Longitude'
+  session:'Session identifier',service:'Service label from source',name:'Tower name',lat:'Latitude',lon:'Longitude'
 };
 const offsets={'330':'IST (UTC+05:30)','0':'UTC','345':'UTC+05:45','60':'UTC+01:00','-300':'UTC−05:00'};
 

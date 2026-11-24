@@ -1,15 +1,16 @@
-import {createDemo,createCase,importFile,previewImport,analyze,ask} from './engine.js';
+import {createDemo,createCase,analyze,ask} from './engine.js';
 import {api,casePath,jsonRequest,listCases,saveCase} from './storage.js';
 import {DeviceStorageError} from './case-store.js';
 import {icon,esc,count,stamp,button,head,rowRefs,empty} from './case-ui.js';
-import {sections,shell,overview,sources,network,towers,devices,assistant,reports,reviewed,pageHeader} from './case-views.js';
+import {sections,shell,demo,overview,sources,network,towers,devices,assistant,reports,reviewed,pageHeader} from './case-views.js';
 import {caseProfile,caseDetailsForm,assignmentForm,adminPage,adminUserForm,importPreview,importOptions} from './case-tools.js';
 import {sha256,uuid} from './crypto.js';
 import {mountSpatial,releaseSpatial} from './spatial.js';
+import {previewLocalFile,importLocalFile,originalSourceBytes} from './local-evidence.js';
 import './register.js';
 
 const $ = selector=>document.querySelector(selector);
-const views={overview,sources,network,towers,devices,assistant,reports};
+const views={demo,overview,sources,network,towers,devices,assistant,reports};
 const state={view:'overview',search:'',offset:0,filters:{},serverSearch:null,searchError:'',node:'',towerSubject:'',edgeLimit:50,timelineLimit:50,deviceLimit:50,ipLimit:50,auditLimit:20};
 const aliases={graph:'network',evidence:'sources',report:'reports',map:'towers'};
 let cases=[], c=null, a=null, busy=false, noteTimer, searchToken=0, searchKey='', pendingFiles=[], adminUsers=null, adminHealth=null, adminError='', adminLoading=false;
@@ -46,6 +47,21 @@ function selectCase(id){
   searchKey='';searchToken++;
   Object.assign(state,{search:'',offset:0,filters:{},serverSearch:null,searchError:'',node:'',towerSubject:'',edgeLimit:50,timelineLimit:50,deviceLimit:50,ipLimit:50,auditLimit:20,leadLimit:4,networkFrom:'',networkTo:'',towerFrom:'',towerTo:'',pathA:'',pathB:''});
   if(c&&!readOnly())remember(c.id);hideModal();render();
+}
+async function openJaipurDemo() {
+  if (team()) return;
+  let sample = cases.find(item => item.id === 'CASE-RJ-001');
+  if (!sample) {
+    busy = true;
+    try {
+      sample = await createDemo();
+      await saveCase(sample);
+      cases.push(sample);
+    } finally {
+      busy = false;
+    }
+  }
+  selectCase(sample.id);
 }
 function accountControls(){
   if(!team() || !window.traceSession)return '';
@@ -145,8 +161,7 @@ function newCaseModal(){
 function importModal(){
   if(!canEdit())throw new Error('Your role cannot import files.');
   pendingFiles=[];
-  const formats=team()?'CSV, TSV, text or XLSX':'CSV, TSV or text';
-  modal('Import evidence',`<form data-form="import" class="dialog-form"><p>Choose files to preview their source columns. Use synthetic data in the demo.</p><label class="file-picker" for="evidence-files">${icon('upload',28)}<strong>Select evidence files</strong><span>${formats} · multiple files supported</span><input id="evidence-files" type="file" name="files" accept=".csv,.tsv,.txt${team()?',.xlsx':''}" multiple required></label><details class="example"><summary>Supported header examples</summary><p>CDR</p><code>Calling Number,Called Number,Timestamp,Duration,Cell ID</code><p>IPDR</p><code>Subscriber,Public IP,Source Port,Protocol,Session Start,Session End</code><p>Tower list</p><code>Cell ID,Tower Name,Latitude,Longitude</code></details><div class="form-actions">${button('Cancel','close','','button')}<button class="button primary">Preview mapping</button></div></form>`);
+  modal('Import evidence',`<form data-form="import" class="dialog-form"><p>Choose files to preview their source columns. Use synthetic data in the demo.</p><label class="file-picker" for="evidence-files">${icon('upload',28)}<strong>Select evidence files</strong><span>CSV, TSV, text or XLSX · multiple files supported</span><input id="evidence-files" type="file" name="files" accept=".csv,.tsv,.txt,.xlsx" multiple required></label><details class="example"><summary>Supported header examples</summary><p>CDR</p><code>Calling Number,Called Number,Timestamp,Duration,Cell ID</code><p>IPDR</p><code>Subscriber,Public IP,Source Port,Protocol,Session Start,Session End</code><p>Tower list</p><code>Cell ID,Tower Name,Latitude,Longitude</code></details><div class="form-actions">${button('Cancel','close','','button')}<button class="button primary">Preview mapping</button></div></form>`);
 }
 function detailsTable(items){return `<dl class="details">${items.map(([label,v])=>`<dt>${esc(label)}</dt><dd>${esc(v??'—')}</dd>`).join('')}</dl>`;}
 function showFile(id){
@@ -171,15 +186,22 @@ async function verifyFile(id){
   const output=$('#verify-result');output.textContent='Checking original bytes…';
   try{
     const result=team()?await api(casePath(c.id,'/sources/'+encodeURIComponent(id)+'/verify'),jsonRequest('POST',{})):
-      {ok:await sha256(new TextEncoder().encode(f.raw||''))===f.sha256};
+      {ok:await sha256(originalSourceBytes(f))===f.sha256};
     output.textContent=result.ok?'Verified. The original matches its recorded SHA-256.':'Integrity check failed. The current bytes differ from the recorded SHA-256.';
     output.className=result.ok?'integrity-pass':'field-error';
   }catch(error){output.textContent=error.message;output.className='field-error';}
 }
+function downloadFile(blob,name){
+  const link=document.createElement('a');
+  link.href=URL.createObjectURL(blob);
+  link.download=name;
+  link.click();
+  setTimeout(()=>URL.revokeObjectURL(link.href),1500);
+}
 function localFile(id){
   const f=c.files.find(v=>v.id===id);if(!f)return;
-  const link=document.createElement('a');link.href=URL.createObjectURL(new Blob([f.raw],{type:'text/plain;charset=utf-8'}));
-  link.download=f.name;link.click();setTimeout(()=>URL.revokeObjectURL(link.href),1500);
+  const type=f.sheet?'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':'text/plain;charset=utf-8';
+  downloadFile(new Blob([originalSourceBytes(f)],{type}),f.name);
 }
 function showRows(ids){
   const set=new Set(ids), rows=c.records.filter(r=>set.has(r.id));
@@ -219,15 +241,19 @@ async function submitAsk(question){
 function reviewModal(){
   if(!canReview())throw new Error('A reviewer must sign this report.');
   if(!c.findings?.length){toast('Save at least one cited finding before review.',true);return;}
-  modal(team()?'Review & sign report':'Local review & sign-off',`<form data-form="review" class="dialog-form"><p>Review ${count(c.findings.length)} saved finding${c.findings.length===1?'':'s'} and their source rows before signing.</p><label for="reviewer">Reviewer name</label><input name="reviewer" id="reviewer" required maxlength="80" ${team()?`value="${esc(window.traceSession?.username)}" readonly`:'placeholder="Enter your name"'}><label class="check-field"><input type="checkbox" required> I have reviewed the cited source records and the limits of each finding.</label><div class="form-actions">${button('Cancel','close','','button')}<button class="button primary">Sign report</button></div></form>`);
+  modal(team()?'Review & sign report':'Local review & sign-off',`<form data-form="review" class="dialog-form"><p>Review ${count(c.findings.length)} saved finding${c.findings.length===1?'':'s'} and their source rows before signing.</p>${team()?'':'<p>Your name and sign-off are recorded on this device. A team case uses the authenticated reviewer’s account.</p>'}<label for="reviewer">Reviewer name</label><input name="reviewer" id="reviewer" required maxlength="80" ${team()?`value="${esc(window.traceSession?.username)}" readonly`:'placeholder="Enter your name"'}><label class="check-field"><input type="checkbox" required> I have reviewed the cited source records and the limits of each finding.</label><div class="form-actions">${button('Cancel','close','','button')}<button class="button primary">Sign report</button></div></form>`);
 }
-async function printReport(){
-  if(!reviewed(c))throw new Error('Review and sign the current report before printing.');
-  await write(item=>log(item,'Report prepared','Signed version '+(item.contentVersion||0)+' prepared for printing.'));
-  const findingRows=c.findings.flatMap(f=>f.ids), ids=new Set(findingRows);
-  const records=c.records.filter(r=>ids.has(r.id)),files=new Set(records.flatMap(r=>r.refs.map(ref=>ref.fileId)));
-  $('#print-report').innerHTML=`<div class="print-title">TRACE−X / INVESTIGATION REPORT</div><h1>${esc(c.name)}</h1><p>${esc(c.id)} · ${team()?'Team review':'Local review'} · ${c.id==='CASE-RJ-001'?'Synthetic demonstration case · ':''}Version ${c.contentVersion||0}</p><p>Reviewed by ${esc(c.review.reviewer)} on ${stamp(c.review.signedAt)} IST.</p><h2>Reviewed findings</h2>${c.findings.map(f=>`<article><h3>${esc(f.title)}</h3><p>${esc(f.text)}</p><p>Source IDs · ${f.ids.map(esc).join(', ')}</p></article>`).join('')}<h2>Source citations</h2>${records.map(r=>`<p><strong>${esc(r.id)}</strong> · ${stamp(r.time)} IST · ${r.refs.map(ref=>esc(c.files.find(f=>f.id===ref.fileId)?.name||ref.fileId)+' (line '+esc(ref.line)+')').join(', ')}</p>`).join('')}<h2>Source file fingerprints</h2>${c.files.filter(f=>files.has(f.id)).map(f=>`<p><strong>${esc(f.name)}</strong><br>SHA-256 · <code>${esc(f.sha256)}</code></p>`).join('')}<p>Findings describe patterns observed in the imported records. Investigator review is required for interpretation.</p>`;
-  window.print();
+async function downloadDeviceReport(){
+  if(team()||readOnly()||!reviewed(c))throw new Error('Review and sign the current report before downloading.');
+  const name=(c.id||'case').replace(/[^a-zA-Z0-9_-]/g,'_');
+  toast('Preparing PDF…');
+  const pdf=await write(async item=>{
+    const {createDeviceReport}=await import('./device-report.js');
+    log(item,'Report prepared','Local PDF for signed version '+(item.contentVersion||0)+'.');
+    return createDeviceReport({...item,synthetic:item.synthetic||item.id==='CASE-RJ-001'});
+  });
+  downloadFile(pdf, name+'-report.pdf');
+  toast('PDF download started.');
 }
 async function upload(file,options,preview=false){
   const data=new FormData();data.set('file',file);data.set('options',JSON.stringify(options));
@@ -244,7 +270,7 @@ async function previewFiles(files){
       try{
         if(file.size>10*1024*1024)throw new Error('Choose a file under 10 MB.');
         if(!/\.(csv|tsv|txt|xlsx)$/i.test(file.name))throw new Error('Choose a supported evidence file.');
-        const preview=team()?await upload(file,{revision:c.revision},true):await previewImport(file);
+        const preview=team()?await upload(file,{revision:c.revision},true):await previewLocalFile(file);
         return {file,preview};
       }catch(error){return {file,error:error.message};}
     }));
@@ -271,7 +297,7 @@ async function confirmImport(data){
     for(const {file:f,options} of batch){
       try{
         const before=item.files.length;
-        const qa=await importFile(item,f.name,f,options);
+        const qa=await importLocalFile(item,f,options);
         outcomes.push({name:f.name,qa});
         if(item.files.length!==before){changed=true;log(item,'Evidence imported',f.name+' · '+qa.accepted+' accepted, '+qa.duplicate+' duplicates, '+qa.rejected+' rejected');}
       }catch(err){outcomes.push({name:f.name,error:err.message});}
@@ -279,7 +305,7 @@ async function confirmImport(data){
     if(changed)dirty(item);
   });
   pendingFiles=[];
-  modal('Import results',`<div class="import-results">${outcomes.map(o=>`<article><h3>${esc(o.name)}</h3><p>${o.error?esc(o.error):`${count(o.qa?.accepted)} accepted · ${count(o.qa?.duplicate)} duplicates · ${count(o.qa?.rejected)} rejected`}</p>${o.qa?.issues?.length?`<details class="example"><summary>Row-level quality checks</summary><ul>${o.qa.issues.slice(0,75).map(issue=>`<li>Row ${esc(issue.line)} · ${esc(issue.message)}</li>`).join('')}</ul>${o.qa.issues.length>75?'<p>Additional messages are available from the imported source.</p>':''}</details>`:''}</article>`).join('')}</div><div class="form-actions">${button('Open evidence library','finish-import','','button primary')}</div>`);
+  modal('Import results',`<div class="import-results">${outcomes.map(o=>`<article><h3>${esc(o.name)}</h3><p class="${o.error||o.qa?.rejected?'field-error':''}">${o.error?esc(o.error):o.qa?.alreadyImported?'This file matches a source already in this case.':`${count(o.qa?.accepted)} accepted · ${count(o.qa?.duplicate)} duplicates · ${count(o.qa?.rejected)} rejected`}</p>${!o.qa?.alreadyImported&&o.qa?.issues?.length?`<details class="example" open><summary>Row-level quality checks (${count(o.qa.issues.length)})</summary><ul>${o.qa.issues.slice(0,50).map(issue=>`<li>Row ${esc(issue.line)} · ${esc(issue.message)}</li>`).join('')}</ul>${o.qa.issues.length>50?'<p>More details appear on the imported source.</p>':''}</details>`:''}</article>`).join('')}</div><div class="form-actions">${button('Open evidence library','finish-import','','button primary')}</div>`);
 }
 document.addEventListener('click',async event=>{
   const btn=event.target.closest('[data-action]');if(!btn)return;
@@ -294,6 +320,18 @@ document.addEventListener('click',async event=>{
       case 'menu':{const open=document.body.classList.toggle('menu-open');btn.setAttribute('aria-expanded',String(open));break;}
       case 'close':hideModal();break;
       case 'nav':nav(v);break;
+      case 'guided-demo-case':await openJaipurDemo();break;
+      case 'guided-links':{
+        const [left,right]=c.subjects;
+        state.pathA=left;
+        state.pathB=right;
+        state.networkFrom='';
+        state.networkTo='';
+        state.node='';
+        nav('network');
+        break;
+      }
+      case 'guided-question':nav('assistant');await submitAsk(v);break;
       case 'new':newCaseModal();break;
       case 'open-case':selectCase(v);nav('overview');break;
       case 'edit-case':if(canManage())modal('Edit case details',caseDetailsForm(c));break;
@@ -323,7 +361,7 @@ document.addEventListener('click',async event=>{
       case 'save-chat':{const m=c.chat.find(x=>x.id===v);if(m?.supported)await saveFinding(m.question,m.text,m.ids);break;}
       case 'prompt':await submitAsk(v);break;
       case 'review':reviewModal();break;
-      case 'print':await printReport();break;
+      case 'device-pdf':await downloadDeviceReport();break;
       case 'node':state.node=v;state.edgeLimit=50;if(state.view==='network')render();else nav('network');break;
       case 'all-nodes':state.node='';render();break;
       case 'clear-search':state.search='';state.offset=0;state.filters={};reloadSearch();break;
@@ -389,10 +427,13 @@ document.addEventListener('submit',async event=>{
       case 'import':await previewFiles(Array.from(form.elements.files.files));break;
       case 'confirm-import':await confirmImport(data);break;
       case 'ask':await submitAsk(String(data.get('question')||'').trim());break;
-      case 'search':
+      case 'search': {
+        const filters=Object.fromEntries([...data].filter(([key])=>key!=='query').map(([key,value])=>[key,String(value).trim()]));
+        if(filters.from&&filters.to&&filters.from>filters.to)throw new Error('The end date must be on or after the start date.');
         state.search=String(data.get('query')||'').trim();state.offset=0;
-        state.filters=Object.fromEntries([...data].filter(([key])=>key!=='query').map(([key,value])=>[key,String(value).trim()]));
+        state.filters=filters;
         reloadSearch();break;
+      }
       case 'graph-range':
       case 'tower-range':{
         const start=String(data.get('start')),end=String(data.get('end'));
@@ -442,7 +483,8 @@ async function initialise(){
       temporaryDemo=true;
       cases=[await createDemo()];
     }
-    selectCase(remembered());
+    const guidedSample=getView()==='demo'&&!team()?cases.find(item=>item.id==='CASE-RJ-001'):null;
+    selectCase(guidedSample?.id||remembered());
   }catch(err){
     const demoLink=!team()&&!readOnly()?'<a class="button" href="./console.html?demo=1">Open synthetic demo</a>':'';
     $('#main').innerHTML=`<section class="panel loading"><h1>Workspace could not open</h1><p>${esc(err.message)}</p><button class="button primary" id="retry-open">Try again</button> ${demoLink}</section>`;

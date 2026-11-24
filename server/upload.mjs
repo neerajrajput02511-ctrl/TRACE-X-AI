@@ -3,8 +3,9 @@ import yauzl from 'yauzl';
 import readXlsx from 'read-excel-file/node';
 import {createHash} from 'node:crypto';
 import * as engine from '../dist/engine.js';
+import {checkWorksheetXml, restrictedEntry, workbookExpandedLimit, workbookSizeLimit, worksheetEntry, worksheetToCsv} from '../dist/workbook-layout.js';
 
-const limit = 10 * 1024 * 1024;
+const limit = workbookSizeLimit;
 const accepted = /\.(csv|tsv|txt|xlsx)$/i;
 const problem = (message, status=400)=>Object.assign(new Error(message),{status});
 const sha = bytes=>createHash('sha256').update(bytes).digest('hex');
@@ -63,22 +64,17 @@ async function inspectZip(bytes) {
       zip.on('entry',entry=>{
         total+=entry.uncompressedSize;
         const name=entry.fileName;
-        if(zip.entryCount>300||total>40*1024*1024||/vbaProject|^xl\/externalLinks\//i.test(name)){fail();return;}
+        if(zip.entryCount>300||total>workbookExpandedLimit||restrictedEntry.test(name)){fail();return;}
         if(name==='xl/workbook.xml')workbook=true;
-        if(!/^xl\/worksheets\/[^\/]+\.xml$/i.test(name)){zip.readEntry();return;}
+        if(!worksheetEntry.test(name)){zip.readEntry();return;}
         if(++worksheets>1){fail();return;}
         zip.openReadStream(entry,(err,stream)=>{
           if(err){fail();return;}
           const chunks=[];
           stream.on('data',chunk=>chunks.push(chunk));stream.on('error',fail);
           stream.on('end',()=>{
-            const xml=Buffer.concat(chunks).toString('utf8');
-            for(const tag of xml.matchAll(/<(?:\w+:)?(?:c|row)\b[^>]*\br\s*=\s*["']([A-Z]*)(\d+)["']/gi)){
-              let col=0;
-              for(const c of tag[1].toUpperCase())col=col*26+c.charCodeAt(0)-64;
-              if(col>128||Number(tag[2])>100000){fail();return;}
-            }
-            if(/<!DOCTYPE\b/i.test(xml)){fail();return;}
+            try{checkWorksheetXml(Buffer.concat(chunks).toString('utf8'));}
+            catch{fail();return;}
             zip.readEntry();
           });
         });
@@ -87,22 +83,12 @@ async function inspectZip(bytes) {
     });
   });
 }
-function csvCell(value){
-  if(value==null)return '';
-  const s=value instanceof Date?value.toISOString().replace(/Z$/,''):String(value);
-  // Escape line breaks so one generated CSV physical row equals one worksheet row.
-  return '"'+s.replace(/\r\n|\r|\n/g,'␤').replace(/"/g,'""')+'"';
-}
 async function workbook(bytes) {
   await inspectZip(bytes);
   let sheets;
   try {sheets=await readXlsx(bytes,{trim:false,parseNumber:String});}
   catch {throw problem('Could not read the XLSX worksheet. Save it as a UTF-8 CSV if the workbook uses unsupported cells.');}
-  const first=sheets[0];
-  if(!first || sheets.length!==1 || first.data.length<2 || first.data.length>100000)throw problem('The XLSX must contain one worksheet with a header and at least one data row.');
-  const width=first.data[0].length;
-  if(width>128 || first.data.some(r=>r.length>128))throw problem('Use up to 128 worksheet columns.');
-  return {sheet:first.sheet, text:first.data.map(row=>Array.from({length:width},(_,i)=>csvCell(row[i])).join(',')).join('\n')};
+  return worksheetToCsv(sheets);
 }
 export async function previewUpload(upload) {
   try {

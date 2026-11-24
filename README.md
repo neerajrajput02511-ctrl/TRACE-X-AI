@@ -2,6 +2,8 @@
 
 Team SHYNE built TRACE-X AI for the Rajasthan Police Cyber Security Hackathon 2026, PS03. The workspace imports synthetic CDR/IPDR data, computes relationships and tower observations, answers approved questions with original-row citations, and exports an independently reviewed report.
 
+The public judge demo opens without an account. Choose **Run Jaipur demo** to walk through the synthetic case. Browser-local imports accept CSV, TSV, text and one-sheet XLSX. [Open the PS03 demo](https://trace-x-ai-shyne.vercel.app/)
+
 ## Start on Windows
 
 From this directory, run:
@@ -23,6 +25,8 @@ Open http://127.0.0.1:4318/. Accounts are provisioned with unique passwords at t
     npm.cmd run e2e
     npm.cmd run e2e:ui
     npm.cmd run e2e:launch
+    npm.cmd run e2e:judge
+    npm.cmd run e2e:workbook
     npm.cmd run benchmark -- 50000
 
 The synthetic fixture can be reset with npm.cmd run demo -- Jaipur --reset. A marked synthetic case is the only case eligible for reset. See the [validation report](VALIDATION_REPORT.md) for executed checks.
